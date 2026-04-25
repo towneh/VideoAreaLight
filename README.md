@@ -13,7 +13,7 @@ VideoAreaLight makes a video render texture behave like a real rectangular area 
 - Area-shaped soft falloff (analytic polygon irradiance, not a spot cone).
 - A blurred image of the video sampled inside the highlight, so the floor reflects what's playing on the screen, not just a colour.
 
-Specular uses Karis's Most Representative Point trick (SIGGRAPH 2013) with a roughness-widened GGX lobe. Diffuse uses an analytic cosine-weighted polygon irradiance integral (a closed-form result from the 1980s). No precomputed lookup tables, no third-party data. URP 17 otherwise has no realtime rectangular area lights (Rect/Disc lights are baked-only); this fills the gap.
+Everything is computed per-pixel in real time — no precomputed lookup textures, no bundled third-party data. The package exists because URP 17 has no native realtime rectangular area lights of its own (Unity's built-in Rect/Disc lights are baked-only). The underlying maths is implemented from publicly-published graphics papers (Karis's Most Representative Point for specular, classical polygon irradiance for diffuse), so the entire package ships under a clean MIT licence with no attribution carry-over.
 
 ## Installation
 
