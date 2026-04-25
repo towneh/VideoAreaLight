@@ -24,7 +24,7 @@ Install via the Unity Package Manager:
 3. Paste:
 
    ```
-   https://github.com/towneh/VideoAreaLight.git?path=Packages/com.towneh.videoarealight
+   https://github.com/towneh/VideoAreaLight.git
    ```
 
 To try the example scene, find **Video Area Light** in the Package Manager, expand **Samples**, and click **Import** next to *Example Scene*. Open the imported `Samples/Video Area Light/<version>/Example Scene/ExampleScene.unity` and hit Play.
