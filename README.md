@@ -1,7 +1,7 @@
 VideoAreaLight
 =========
 
-Real-time area-light reflections from a video screen, in URP 17 / Forward+
+Real-time area-light reflections from a video screen, designed for Unity 6000.0+ (URP 17 & Forward+)
 
 
 OVERVIEW
