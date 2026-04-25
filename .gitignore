@@ -1,3 +1,8 @@
+# Unity-generated meta for non-asset docs/config (not part of UPM package)
+*.md.meta
+*.txt.meta
+*.json.meta
+
 # OS
 .DS_Store
 Thumbs.db
