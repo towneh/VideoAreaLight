@@ -33,23 +33,6 @@ the floor and walls. Use it as a reference for material settings,
 prefab placement, and the cyan-gizmo orientation rule.
 
 
-HOW IT RELATES TO VideoColourBouncer
-------------------------------------
-Complementary, not competing.
-
-  VideoColourBouncer  Drives spot lights from the video colour. Cheap.
-                      Ambient room fill from rough off-axis surfaces.
-                      Circular highlights, no cookie.
-
-  VideoAreaLight      Drives one rectangular area light matched to the
-                      screen. Per-pixel cost on opted-in materials.
-                      Rectangular highlights with the video content
-                      visible inside (cookie).
-
-Run both. Bouncer fills the room, AreaLight handles direct reflections
-on glossy surfaces.
-
-
 WHAT'S IN THIS FOLDER
 ---------------------
   README.txt
@@ -193,11 +176,6 @@ At 90 Hz, ~2k per eye, with one area light:
 Cost levers, in order of impact: number of materials using the
 shader → cookie ON/OFF → surface gloss (rough surfaces still pay
 the eval cost for nearly-invisible highlights, prefer to skip).
-
-Combined with VideoColourBouncer on Quest:
-  Bouncer alone:                        0.5 - 1.5 ms
-  Bouncer + AreaLight on floor only:    0.9 - 2.0 ms
-  Bouncer + AreaLight on full set:      1.7 - 3.5 ms
 
 
 KNOWN LIMITATIONS
