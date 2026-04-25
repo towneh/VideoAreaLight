@@ -1,0 +1,27 @@
+{
+  "name": "com.towneh.videoarealight",
+  "version": "1.0.0",
+  "displayName": "Video Area Light",
+  "description": "Real-time area-light reflections from a video render texture for Unity URP 17 / Forward+. A bright video screen lights and reflects on glossy surfaces (floors, metal, panels) using an MRP specular approximation plus an analytic polygon irradiance integral. No precomputed lookup tables, no third-party data - MIT licensed.",
+  "unity": "6000.0",
+  "license": "MIT",
+  "author": {
+    "name": "Matt Town",
+    "url": "https://github.com/towneh"
+  },
+  "keywords": [
+    "urp",
+    "area-light",
+    "video",
+    "reflection",
+    "shader",
+    "vr"
+  ],
+  "samples": [
+    {
+      "displayName": "Example Scene",
+      "description": "A simple room demonstrating the area light effect on glossy walls and floor.",
+      "path": "Samples~/ExampleScene"
+    }
+  ]
+}

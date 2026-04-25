@@ -1,0 +1,28 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor scratch
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# IDE
+.idea/
+.vscode/
+*.csproj
+*.sln
+*.user
+
+# Build / log artifacts (shouldn't appear in a package repo, but just in case)
+Logs/
+Library/
+Temp/
+obj/
+*.log
+
+# OS-specific
+*.DS_Store
+$RECYCLE.BIN/
