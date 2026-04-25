@@ -2,7 +2,6 @@ VideoAreaLight
 =========
 
 Real-time area-light reflections from a video screen, in URP 17 / Forward+
-Licensed under the MIT License - see LICENSE.txt
 
 
 OVERVIEW
