@@ -5,6 +5,9 @@
   "description": "Real-time area-light reflections from a video render texture for Unity URP 17 / Forward+. A bright video screen lights and reflects on glossy surfaces (floors, metal, panels) using an MRP specular approximation plus an analytic polygon irradiance integral. No precomputed lookup tables, no third-party data - MIT licensed.",
   "unity": "6000.0",
   "license": "MIT",
+  "dependencies": {
+    "com.unity.render-pipelines.universal": "17.0.0"
+  },
   "author": {
     "name": "Matt Town",
     "url": "https://github.com/towneh"
