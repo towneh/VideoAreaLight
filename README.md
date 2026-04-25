@@ -31,7 +31,7 @@ To try the example scene, find **Video Area Light** in the Package Manager, expa
 
 ## Quick start
 
-1. **Drag** `Prefab/VideoAreaLight.prefab` onto the GameObject whose quad mesh displays the video.
+1. **Drag** `Runtime/Prefab/VideoAreaLight.prefab` onto the GameObject whose quad mesh displays the video.
 2. **Assign Video Texture** (your VideoPlayer's render texture) on the `VideoAreaLightSource` component.
 3. **Verify the cyan gizmo** points INTO the room. If not, toggle **Flip Normal**.
 4. **Switch your floor / wall materials** to the `VideoAreaLight/Lit` shader. The property block mirrors URP/Lit, so existing texture, colour, smoothness, metallic, normal, occlusion, and emission values carry over.
@@ -53,23 +53,26 @@ VideoAreaLight/
 ├── README.md
 ├── LICENSE.txt
 ├── CHANGELOG.md
-├── Prefab/
-│   └── VideoAreaLight.prefab           pre-configured broadcaster
-├── Scripts/
-│   ├── VideoAreaLightSource.cs         broadcaster MonoBehaviour
-│   └── Editor/
-│       └── VideoAreaLightLitGUI.cs     custom material inspector
-├── Shaders/
-│   ├── RectAreaLight.hlsl              core math include
-│   ├── VideoAreaLight_Lit.shader       drop-in URP/Lit-compatible shader
-│   └── VideoAreaLight_SG.hlsl          Shader Graph custom-function entry point
+├── Runtime/
+│   ├── com.towneh.videoarealight.Runtime.asmdef
+│   ├── Prefab/
+│   │   └── VideoAreaLight.prefab       pre-configured broadcaster
+│   ├── Scripts/
+│   │   └── VideoAreaLightSource.cs     broadcaster MonoBehaviour
+│   └── Shaders/
+│       ├── RectAreaLight.hlsl          core math include
+│       ├── VideoAreaLight_Lit.shader   drop-in URP/Lit-compatible shader
+│       └── VideoAreaLight_SG.hlsl      Shader Graph custom-function entry point
+├── Editor/
+│   ├── com.towneh.videoarealight.Editor.asmdef
+│   └── VideoAreaLightLitGUI.cs         custom material inspector
 └── Samples~/
     └── ExampleScene/                   importable demo scene
 ```
 
 ## Shader Graph alternative
 
-If you'd rather not use the drop-in shader, drop `Shaders/VideoAreaLight_SG.hlsl` into a **Custom Function** node:
+If you'd rather not use the drop-in shader, drop `Runtime/Shaders/VideoAreaLight_SG.hlsl` into a **Custom Function** node:
 
 - **Type:** File
 - **Source:** drag the `.hlsl` file in
