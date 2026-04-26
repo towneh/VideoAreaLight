@@ -2,6 +2,16 @@
 
 All notable changes to this package are documented here.
 
+## [1.1.0] - 2026-04-26
+
+### Added
+- **Poiyomi Pro Modular Shader integration.** Existing Poiyomi-shaded materials can now receive `VideoAreaLightSource` contribution without switching shader.
+- Two-step setup: `Tools > VideoAreaLight > Install Poiyomi Module` (one-time, fast), then right-click a material → `VideoAreaLight - Apply to Material's Shader`. A confirmation dialog shows the actual blast radius before regenerating. Multi-select supported via the Project window. Uninstall via the same Tools menu.
+- Per-material toggle (default OFF) plus diffuse/specular multipliers and cookie checkbox.
+- Integration menu items auto-hide in projects where Poiyomi isn't installed.
+- `Documentation~/PoiyomiIntegration.md` with the full guide; `Samples~/PoiyomiIntegration/` for inspecting or forking the template.
+- Package Manager `documentationUrl` / `changelogUrl` / `licensesUrl` metadata.
+
 ## [1.0.0] - 2026-04-25
 
 ### Added
