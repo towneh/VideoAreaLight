@@ -2,7 +2,7 @@
 
 Real-time area-light reflections from a video screen, designed for Unity 6000.0+ (URP 17 & Forward+).
 
-<img width="1315" height="936" alt="image" src="https://github.com/user-attachments/assets/9c58a033-3506-4080-92d1-075e7f5e4ecf" />
+<img width="1304" height="774" alt="{EF56EBB5-AD9F-45C5-8F5B-E348DD360F06}" src="https://github.com/user-attachments/assets/be60ab21-3e7a-4201-9f0d-e276ef1721ba" />
 <i>Above example running on Basis VR (Unity 6000.4.4f1) & NormalMap sourced from AreaLit Demo scene.</i>
 
 ## Overview
