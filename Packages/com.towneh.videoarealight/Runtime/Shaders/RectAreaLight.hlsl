@@ -211,8 +211,9 @@ float3 VAL_SpecularContribution(
     float lex   = sqrt(dot(ex, ex));
     float ley   = sqrt(dot(ey, ey));
     float halfDiag = 0.5 * sqrt(lex * lex + ley * ley);
+    float angularSpread = halfDiag / max(2.0 * dist, 1e-5);
     float alpha    = max(roughness * roughness, 1e-4);
-    float alphaP   = saturate(alpha + halfDiag / max(2.0 * dist, 1e-5));
+    float alphaP   = saturate(alpha + angularSpread);
 
     // GGX D
     float a2 = alphaP * alphaP;
@@ -228,8 +229,15 @@ float3 VAL_SpecularContribution(
     // Schlick fresnel at the half-vector
     float3 F = F0 + (1.0 - F0) * pow(1.0 - VoH, 5.0);
 
-    // Karis energy compensation for the lobe widening
-    float normFactor = alpha / max(alphaP, 1e-5);
+    // Karis energy compensation for the lobe widening, with the
+    // numerator floored at the source's angular size. A reflection of
+    // an area source physically can't be sharper than the source's
+    // solid angle, so as roughness drops below that floor we stop
+    // pretending alpha keeps shrinking. Without this floor, (alpha /
+    // alphaP)^2 collapses to zero on near-mirror receivers
+    // (smoothness ~ 1) and the highlight disappears.
+    float alphaForNorm = max(alpha, angularSpread);
+    float normFactor = alphaForNorm / max(alphaP, 1e-5);
     normFactor *= normFactor;
 
     float3 brdf = D * G * F * normFactor / max(4.0 * NoV * NoL, 1e-5);
