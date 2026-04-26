@@ -12,6 +12,9 @@
     "name": "Matt Town",
     "url": "https://github.com/towneh"
   },
+  "documentationUrl": "https://github.com/towneh/VideoAreaLight#readme",
+  "changelogUrl": "https://github.com/towneh/VideoAreaLight/blob/main/CHANGELOG.md",
+  "licensesUrl": "https://github.com/towneh/VideoAreaLight/blob/main/LICENSE.txt",
   "keywords": [
     "urp",
     "area-light",
@@ -25,6 +28,11 @@
       "displayName": "Example Scene",
       "description": "A simple room demonstrating the area light effect on glossy walls and floor.",
       "path": "Samples~/ExampleScene"
+    },
+    {
+      "displayName": "Poiyomi Integration",
+      "description": "Modular Shader template for Poiyomi Pro. Importing this isn't required - the installer at Tools > VideoAreaLight > Install Poiyomi Module pulls the template directly from the package. Imported only if you want to inspect or fork the source.",
+      "path": "Samples~/PoiyomiIntegration"
     }
   ]
 }

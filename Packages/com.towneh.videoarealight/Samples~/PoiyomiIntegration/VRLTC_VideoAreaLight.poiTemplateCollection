@@ -1,0 +1,66 @@
+#T#PoiVideoAreaLightProperties
+//ifex _VideoAreaLightEnabled!=1
+[HideInInspector] m_start_VideoAreaLight (" Video Area Light--{reference_property:_VideoAreaLightEnabled,button_help:{text:GitHub,action:{type:URL,data:https://github.com/towneh/VideoAreaLight},hover:Open the VideoAreaLight repo on GitHub}}", Float) = 0
+[Toggle(POI_VIDEOAREALIGHT)]_VideoAreaLightEnabled ("Video Area Light Enabled", Float) = 0
+[ToggleUI] _VideoAreaLight_UseCookie ("Sample Video Cookie for Specular", Int) = 1
+_VideoAreaLight_DiffuseMultiplier ("Diffuse Multiplier", Range(0, 4)) = 1.0
+_VideoAreaLight_SpecularMultiplier ("Specular Multiplier", Range(0, 4)) = 1.0
+[HideInInspector] m_end_VideoAreaLight ("VideoAreaLight", Float) = 0
+//endex
+#T#PoiVideoAreaLightKeywords
+//ifex _VideoAreaLightEnabled!=1
+#pragma shader_feature_local POI_VIDEOAREALIGHT
+//endex
+#T#PoiVideoAreaLightVariables
+//ifex _VideoAreaLightEnabled!=1
+#ifdef POI_VIDEOAREALIGHT
+    int _VideoAreaLight_UseCookie;
+    float _VideoAreaLight_DiffuseMultiplier;
+    float _VideoAreaLight_SpecularMultiplier;
+#endif
+//endex
+#T#PoiVideoAreaLightFunction
+//ifex _VideoAreaLightEnabled!=1
+#ifdef POI_VIDEOAREALIGHT
+    #include "Packages/com.towneh.videoarealight/Runtime/Shaders/RectAreaLight.hlsl"
+#endif
+//endex
+#T#PoiVideoAreaLightFunctionCall
+//ifex _VideoAreaLightEnabled!=1
+#ifdef POI_VIDEOAREALIGHT
+    {
+        // VAL is a global emitter (one VideoAreaLightSource per scene pushes
+        // _VAL_* globals via Shader.SetGlobal*). The MAIN_LIGHT_PASS gate
+        // ensures we only contribute once per fragment, not per Unity light.
+        float3 _val_diffuse = 0;
+        float3 _val_specular = 0;
+
+        // Bent normal feeds the diffuse polygon-irradiance integral when
+        // available, matching how LTCGI handles ambient occlusion.
+        float3 _val_normal = poiMesh.normals[1];
+    #ifdef POI_BENTNORMALMAP
+        if (poiMesh.hasBentNormal) _val_normal = poiMesh.bentNormal;
+    #endif
+
+        VAL_EvaluateAreaLight(
+            poiMesh.worldPos,
+            _val_normal,
+            normalize(poiCam.worldPos - poiMesh.worldPos),
+            1.0 - poiFragData.smoothness,
+            poiFragData.baseColor.rgb,
+            poiFragData.metallic,
+            _VideoAreaLight_UseCookie != 0,
+            _val_diffuse, _val_specular);
+
+        // Both diffuse and specular go into finalLightAdd, NOT finalLighting.
+        // The FRAGMENT_BASE_LIGHTING injection point lands AFTER Poiyomi's
+        // diffuse snapshot (`finalColor = baseColor * finalLighting`), so
+        // anything we add to finalLighting is dead code. finalLightAdd is
+        // applied to finalColor *after* our injection, so both terms survive.
+        // VAL_EvaluateAreaLight already multiplies the diffuse component by
+        // baseColor internally, so we don't lose the albedo modulation.
+        poiLight.finalLightAdd += _val_diffuse  * _VideoAreaLight_DiffuseMultiplier;
+        poiLight.finalLightAdd += _val_specular * _VideoAreaLight_SpecularMultiplier;
+    }
+#endif
+//endex
