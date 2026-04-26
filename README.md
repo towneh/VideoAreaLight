@@ -67,10 +67,26 @@ VideoAreaLight/
 │       └── VideoAreaLight_SG.hlsl      Shader Graph custom-function entry point
 ├── Editor/
 │   ├── com.towneh.videoarealight.Editor.asmdef
-│   └── VideoAreaLightLitGUI.cs         custom material inspector
+│   ├── VideoAreaLightLitGUI.cs         custom material inspector
+│   ├── PoiyomiModuleInstaller.cs       Tools menu: install/uninstall Poiyomi module
+│   └── IntegrationMenuVisibility.cs    auto-hides shader-integration menus when host shader missing
+├── Documentation~/
+│   └── PoiyomiIntegration.md           full guide for the Poiyomi Pro integration
 └── Samples~/
-    └── ExampleScene/                   importable demo scene
+    ├── ExampleScene/                   importable demo scene
+    └── PoiyomiIntegration/             Poiyomi Pro Modular Shader template
 ```
+
+## Poiyomi Pro integration
+
+If your scene uses Poiyomi Pro, VideoAreaLight ships a Modular Shader module so existing Poiyomi-shaded materials can receive the area light without switching shader. Two-step setup:
+
+1. **Tools → VideoAreaLight → Install Poiyomi Module** (one-time, fast).
+2. Right-click each Poiyomi material → **VideoAreaLight - Apply to Material's Shader** (regenerates only those shaders).
+
+Then toggle **Video Area Light Enabled** on the materials you want lit. The same `VideoAreaLightSource` broadcaster drives both Poiyomi and `VideoAreaLight/Lit` materials — globals are global; you don't need a second component.
+
+**Full guide:** [`Packages/com.towneh.videoarealight/Documentation~/PoiyomiIntegration.md`](Packages/com.towneh.videoarealight/Documentation~/PoiyomiIntegration.md) — covers the mental model (shader-scoped, not material-scoped), the confirmation dialog, locking interaction, uninstall, and troubleshooting.
 
 ## Shader Graph alternative
 
