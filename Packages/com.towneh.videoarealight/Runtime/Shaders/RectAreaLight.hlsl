@@ -214,16 +214,24 @@ void VAL_FindMRP(
     mrpUV = float2(u, v);
 
     // insideMask: 1 if the unclamped reflection-ray intersection landed
-    // inside the rectangle [0,1]^2; 0 if it landed outside. A small
-    // smoothstep falloff softens the edge so the highlight tapers off
-    // cleanly instead of cutting hard. Without this mask, MRP's saturate
-    // clamps the hit to the nearest edge and the cookie's edge texels
-    // smear out across receivers whose reflection rays never actually
-    // touched the screen.
-    float du = max(0.0, max(-uRaw, uRaw - 1.0));
-    float dv = max(0.0, max(-vRaw, vRaw - 1.0));
+    // inside the rectangle; smoothly fades to 0 over a small world-space
+    // margin past the edge. Without this mask, MRP's saturate clamps the
+    // hit to the nearest edge and the cookie's edge texels smear out
+    // across receivers whose reflection rays never actually touched the
+    // screen.
+    //
+    // Feathered in world space (not UV space) so the visible streak
+    // length is screen-size-independent: a 1cm margin is invisibly
+    // narrow on the floor whether the screen is 0.5m or 10m wide. The
+    // earlier UV-space margin scaled with the screen and produced 20cm+
+    // streaks on large emitters.
+    const float kEdgeFeatherMeters = 0.01;
+    float lex = sqrt(lex2);
+    float ley = sqrt(ley2);
+    float du = max(0.0, max(-uRaw, uRaw - 1.0)) * lex;
+    float dv = max(0.0, max(-vRaw, vRaw - 1.0)) * ley;
     float distOutside = sqrt(du * du + dv * dv);
-    insideMask = 1.0 - smoothstep(0.0, 0.05, distOutside);
+    insideMask = 1.0 - smoothstep(0.0, kEdgeFeatherMeters, distOutside);
 }
 
 float3 VAL_SpecularContribution(
