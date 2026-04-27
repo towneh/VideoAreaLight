@@ -3,6 +3,7 @@ using System.IO;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.Video;
@@ -276,15 +277,28 @@ namespace VideoAreaLight.Samples.Demo
         //
         // Parameters chosen for typical video content + clean reflections:
         //   1920×1080 (matches HD video clips),
-        //   mipmaps on + trilinear (smooth reflections at distance/grazing),
-        //   linear colour space, Clamp wrap.
+        //   16-bit-per-channel UNorm linear (R16G16B16A16_UNorm) — the
+        //   cookie sample is multiplied through the broadcaster's
+        //   intensity (60+ in the demo), and at 8 bits per channel that
+        //   pushes smooth gradients into visible banding territory.
+        //   Doubles RT memory vs 8-bit but is still ~16 MB at 1080p,
+        //   trivial in context. Unity's video-player docs recommend 8-bit
+        //   for direct video display — that's the right call when the
+        //   texture is just blitted to screen, but we sample it through
+        //   HDR lighting math so the extra precision earns its keep.
+        //   Mipmaps on + trilinear (smooth reflections at distance/
+        //   grazing), Clamp wrap (prevents bilinear edge wrap-around).
         static RenderTexture CreateScreenRT(string folder)
         {
             string path = $"{folder}/VAL_Screen_RT.renderTexture";
-            var existing = AssetDatabase.LoadAssetAtPath<RenderTexture>(path);
-            if (existing != null) return existing;
+            // Always recreate. An existing asset from a prior build may have
+            // a stale format (e.g. the 8-bit RGBA we shipped before bumping
+            // to 16-bit), and the VideoPlayer's targetTexture is rewired
+            // each build anyway, so there's no reference to preserve.
+            if (AssetDatabase.LoadAssetAtPath<RenderTexture>(path) != null)
+                AssetDatabase.DeleteAsset(path);
 
-            var rt = new RenderTexture(1920, 1080, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear)
+            var rt = new RenderTexture(1920, 1080, 0, GraphicsFormat.R16G16B16A16_UNorm)
             {
                 name = "VAL_Screen_RT",
                 useMipMap = true,
