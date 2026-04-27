@@ -244,15 +244,19 @@ float3 VAL_SpecularContribution(
     float angularSpread = halfDiag / max(2.0 * dist, 1e-5);
     float alpha    = max(roughness * roughness, 1e-4);
     // alphaP is the lobe width widened by the rectangle's angular extent
-    // (Karis). Don't saturate it — Karis's formulation is valid (and
-    // intended) for alphaP > 1, where the source's solid angle dominates
-    // surface roughness. Capping at 1 introduced a derivative
-    // discontinuity at alpha + angularSpread = 1; that kink, when
-    // multiplied with the other BRDF factors that vary with reflection
-    // geometry, manifested as a visible darker band on the floor along
-    // the locus where the equality held. D and normFactor naturally fade
-    // as alphaP grows, so no upper cap is needed.
-    float alphaP   = alpha + angularSpread;
+    // (Karis). The previous saturate(...) clamp at 1 introduced a hard
+    // derivative discontinuity that, multiplied with the other BRDF
+    // factors, manifested as a visible band on the floor along the
+    // locus where the kick-in occurred. Replace with a smooth
+    // tanh-based asymptotic cap: stays near-linear for typical values
+    // (alpha + angularSpread <= ~1) and asymptotes smoothly to Mmax
+    // for large values. No derivative discontinuities anywhere.
+    //
+    // Mmax sets how aggressively to cap the lobe width near the source.
+    // Higher = sharper near-source but more original-style haze; lower =
+    // softer transitions but more diffuse near-source reflection.
+    const float Mmax = 1.0;
+    float alphaP   = Mmax * tanh((alpha + angularSpread) / Mmax);
 
     // GGX D
     float a2 = alphaP * alphaP;
