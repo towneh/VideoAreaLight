@@ -27,7 +27,7 @@ Install via the Unity Package Manager:
    https://github.com/towneh/VideoAreaLight.git?path=Packages/com.towneh.videoarealight
    ```
 
-To try the example scene, find **Video Area Light** in the Package Manager, expand **Samples**, and click **Import** next to *Example Scene*. Open the imported `Samples/Video Area Light/<version>/Example Scene/ExampleScene.unity` and hit Play.
+To try the demo scene, find **Video Area Light** in the Package Manager, expand **Samples**, and click **Import** next to *Demo*. Then run **Tools > VideoAreaLight > Build Demo Scene** — this generates the scene, materials, render texture, placeholder image, and auto-bakes both probe volumes. Open the generated `Demo.unity` and hit Play.
 
 ## Quick start
 
@@ -104,7 +104,7 @@ VideoAreaLight/
 │   ├── Occlusion.md                       occlusion guide and recipes
 │   └── FutureIdeas.md                     forward-looking ideas not yet shipped
 └── Samples~/
-    ├── ExampleScene/                      importable demo scene
+    ├── Demo/                              importable demo scene (built via menu command)
     └── PoiyomiIntegration/                Poiyomi Pro Modular Shader template
 ```
 

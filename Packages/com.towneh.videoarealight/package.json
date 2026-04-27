@@ -25,9 +25,9 @@
   ],
   "samples": [
     {
-      "displayName": "Example Scene",
-      "description": "A simple room demonstrating the area light effect on glossy walls and floor.",
-      "path": "Samples~/ExampleScene"
+      "displayName": "Demo",
+      "description": "A small club-style venue with a 90-degree corridor and adjacent spawn alcove. Demonstrates the full feature set on a glossy floor: area-light reflections, the zone mask cutting contribution at the venue boundary, and cascading probe volumes (one coarse + one fine around the DJ booth) catching what the OBB can't. After import, run Tools > VideoAreaLight > Build Demo Scene — the builder generates the scene, materials, render texture, a placeholder image, and auto-bakes both probe volumes.",
+      "path": "Samples~/Demo"
     },
     {
       "displayName": "Poiyomi Integration",
