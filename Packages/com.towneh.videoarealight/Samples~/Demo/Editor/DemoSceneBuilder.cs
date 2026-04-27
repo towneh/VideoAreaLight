@@ -4,6 +4,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.Video;
 
 namespace VideoAreaLight.Samples.Demo
@@ -67,6 +68,7 @@ namespace VideoAreaLight.Samples.Demo
 
             var screenRT = CreateScreenRT(texturesPath);
             var placeholder = CreatePlaceholderTexture(texturesPath);
+            var volumeProfile = CreateVolumeProfile(sampleRoot);
 
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
@@ -81,6 +83,7 @@ namespace VideoAreaLight.Samples.Demo
             BuildDJBooth(props, mats);
 
             var lighting = new GameObject("Lighting").transform;
+            BuildPostFXVolume(lighting, volumeProfile);
             var src = BuildVALSource(lighting, mats, screenRT, placeholder);
             BuildZoneMask(lighting, src);
             // Encoding choice per probe is the demo's headline showcase of
@@ -361,6 +364,52 @@ namespace VideoAreaLight.Samples.Demo
         }
 
         // --------------------------------------------------------------
+        // Post-processing volume profile
+        //
+        // ACES tonemap + a touch of bloom: the screen is HDR-bright and
+        // we want it to read as "lit from within" without washing out
+        // the surrounding venue. Threshold 1.0 keeps the bloom confined
+        // to the emissive screen surface; the dim ambient and matte
+        // walls don't contribute. Intensity 0.1 stays subtle — bloom
+        // is a finishing touch here, not the headline effect.
+        // --------------------------------------------------------------
+
+        static VolumeProfile CreateVolumeProfile(string folder)
+        {
+            string path = $"{folder}/Demo Volume Profile.asset";
+            if (AssetDatabase.LoadAssetAtPath<VolumeProfile>(path) != null)
+                AssetDatabase.DeleteAsset(path);
+
+            var profile = ScriptableObject.CreateInstance<VolumeProfile>();
+            AssetDatabase.CreateAsset(profile, path);
+
+            var tonemap = profile.Add<Tonemapping>(false);
+            tonemap.hideFlags = HideFlags.HideInHierarchy | HideFlags.HideInInspector;
+            AssetDatabase.AddObjectToAsset(tonemap, profile);
+            tonemap.mode.Override(TonemappingMode.ACES);
+
+            var bloom = profile.Add<Bloom>(false);
+            bloom.hideFlags = HideFlags.HideInHierarchy | HideFlags.HideInInspector;
+            AssetDatabase.AddObjectToAsset(bloom, profile);
+            bloom.threshold.Override(1f);
+            bloom.intensity.Override(0.1f);
+
+            EditorUtility.SetDirty(profile);
+            return profile;
+        }
+
+        static void BuildPostFXVolume(Transform parent, VolumeProfile profile)
+        {
+            var go = new GameObject("PostFX_Volume");
+            go.transform.SetParent(parent, false);
+            var v = go.AddComponent<Volume>();
+            v.isGlobal = true;
+            v.priority = 0;
+            v.weight = 1f;
+            v.sharedProfile = profile;
+        }
+
+        // --------------------------------------------------------------
         // Render settings (dark club ambient — the screen IS the light)
         // --------------------------------------------------------------
 
@@ -625,6 +674,11 @@ namespace VideoAreaLight.Samples.Demo
             cam.fieldOfView = 70f;
             cam.clearFlags = CameraClearFlags.SolidColor;
             cam.backgroundColor = Color.black;
+
+            // URP cameras default to renderPostProcessing = false, so the
+            // PostFX_Volume's profile would be inert without this flag.
+            cam.GetUniversalAdditionalCameraData().renderPostProcessing = true;
+
             go.AddComponent<AudioListener>();
         }
     }
