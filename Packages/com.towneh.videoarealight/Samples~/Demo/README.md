@@ -48,6 +48,17 @@ stays as the placeholder average. If #2 is missed, the screen shows the
 video but the lighting tracks the placeholder. If #3 is missed, the
 lighting follows the video but the screen visual is frozen on the bars.
 
+**Texture wrap mode caveat:** any texture you assign to `VAL_Source →
+Video Texture` (whether a render texture, image asset, or video
+texture) should have its **Wrap Mode set to `Clamp`** in the Inspector.
+The default for image imports is `Repeat`, which causes bilinear
+sampling at UVs near the texture's edges to pull in colours from the
+opposite side; in the floor's specular reflection, that bleeds visible
+bands of unrelated colour past the screen's actual footprint. The
+generated `VAL_Screen_RT` render texture is already Clamp-by-default;
+the generated `VAL_ScreenPlaceholder` PNG is also force-set to Clamp
+by the builder. User-supplied assets need to be set manually.
+
 ## What each toggle demonstrates
 
 Open the scene, enter Play mode, then in the Inspector:

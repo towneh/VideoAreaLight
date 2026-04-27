@@ -285,7 +285,11 @@ namespace VideoAreaLight.Samples.Demo
         {
             string path = $"{folder}/VAL_ScreenPlaceholder.png";
             var existing = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
-            if (existing != null) return existing;
+            if (existing != null)
+            {
+                EnforceCookieTextureSettings(path);
+                return existing;
+            }
 
             const int w = 320, h = 180;
 
@@ -320,7 +324,24 @@ namespace VideoAreaLight.Samples.Demo
             string absPath = Path.Combine(projectRoot, path);
             File.WriteAllBytes(absPath, png);
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+            EnforceCookieTextureSettings(path);
             return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+        }
+
+        // Force the texture's wrap mode to Clamp. Unity's default texture
+        // import wrap mode is Repeat, which causes bilinear sampling at
+        // UVs near 0/1 to pull in colours from the opposite edge of the
+        // texture. For a cookie texture sampled by the area light, that
+        // bleeds visible bands of unrelated colour past the reflection's
+        // actual footprint on receiving surfaces. Same caution applies to
+        // any user-supplied video texture or render texture.
+        static void EnforceCookieTextureSettings(string path)
+        {
+            var importer = AssetImporter.GetAtPath(path) as TextureImporter;
+            if (importer == null) return;
+            if (importer.wrapMode == TextureWrapMode.Clamp) return;
+            importer.wrapMode = TextureWrapMode.Clamp;
+            importer.SaveAndReimport();
         }
 
         // --------------------------------------------------------------

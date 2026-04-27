@@ -293,7 +293,13 @@ float3 VAL_SpecularContribution(
         // transform.worldToLocalMatrix and is unaffected by Flip Normal's corner
         // reordering, so the cookie sample stays in the same orientation as the
         // video appears on the screen mesh - no horizontal mirror artifact.
-        float2 cookieUV = mul(_VAL_CookieWorldToUV, float4(mrpWS, 1.0)).xy;
+        // Clamp the cookie UV defensively: the proper fix for cookie-edge
+        // bleeding is the texture's wrap mode (should be Clamp), but if a
+        // user-supplied video texture has wrapMode = Repeat, bilinear at
+        // UVs near 0/1 pulls colours from the opposite edge and the
+        // reflection bleeds bright bands past its actual footprint. Worth
+        // the one ALU.
+        float2 cookieUV = saturate(mul(_VAL_CookieWorldToUV, float4(mrpWS, 1.0)).xy);
         float mip = roughness * 7.0;
         emit *= SAMPLE_TEXTURE2D_LOD(_VAL_CookieTex, sampler_VAL_CookieTex, cookieUV, mip).rgb;
     }
