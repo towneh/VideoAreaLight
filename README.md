@@ -7,15 +7,13 @@ Real-time area-light reflections from a video screen, designed for Unity 6000.0+
 
 ## Overview
 
-VideoAreaLight makes a video render texture behave like a real rectangular area light source in URP 17. Glossy receivers (dance floor, metal walls, polished panels) pick up:
+VideoAreaLight makes a video screen light up your scene like a real rectangular light source. Glossy surfaces — dance floors, metal walls, polished panels — pick up:
 
-- A rectangular specular highlight that follows the screen's pose as the camera moves.
-- Area-shaped soft falloff (analytic polygon irradiance, not a spot cone).
-- A blurred image of the video sampled inside the highlight, so the floor reflects what's playing on the screen, not just a colour.
+- A bright rectangular highlight that follows the screen's shape as the camera moves.
+- Soft area-shaped falloff, not a spot cone.
+- A blurred reflection of the video sampled inside the highlight, so the floor reflects what's playing on the screen rather than just a flat colour.
 
-Everything is computed per-pixel in real time — no precomputed lookup textures, no bundled third-party data. The package exists because URP 17 has no native realtime rectangular area lights of its own (Unity's built-in Rect/Disc lights are baked-only). 
-
-The underlying maths is implemented from publicly-published graphics papers (Karis's Most Representative Point for specular, classical polygon irradiance for diffuse), so the entire package ships under a clean MIT licence with no attribution carry-over.
+Everything runs in real time per-pixel. No precomputed textures or bundled third-party data, so the whole package is MIT-licensed and free to ship with your project.
 
 ## Installation
 
@@ -33,19 +31,44 @@ To try the example scene, find **Video Area Light** in the Package Manager, expa
 
 ## Quick start
 
-1. **Drag** `Runtime/Prefab/VideoAreaLight.prefab` onto the GameObject whose quad mesh displays the video.
-2. **Assign Video Texture** (your VideoPlayer's render texture) on the `VideoAreaLightSource` component.
-3. **Verify the cyan gizmo** points INTO the room. If not, toggle **Flip Normal**.
-4. **Switch your floor / wall materials** to the `VideoAreaLight/Lit` shader. The property block mirrors URP/Lit, so existing texture, colour, smoothness, metallic, normal, occlusion, and emission values carry over.
+1. **Add a `VideoAreaLightSource` component** to the GameObject that holds your video screen mesh.
+2. **Assign your Video Texture** (the render texture your VideoPlayer writes to).
+3. **Check the cyan gizmo** points into the room. If not, toggle **Flip Normal**.
+4. **Switch your floor and wall materials** to the `VideoAreaLight/Lit` shader (or use the Poiyomi or Shader Graph integrations). Existing texture, colour, smoothness, metallic, normal, occlusion, and emission values carry over from URP/Lit.
 5. **Tick `Use Video Cookie`** on high-gloss surfaces (Smoothness > 0.5).
+6. **Add a Zone Mask.** The broadcaster's inspector shows a **Create Zone Mask** button when none is assigned. Click it, then resize the box to encompass your room. Without one, screen reflections land on every surface in the world.
 
-Standard URP/Lit features still work: shadows, lightmaps, depth prepass, SSAO, fog, decals, Forward+ punctual lighting. The area-light contribution is additive on top.
+Standard URP/Lit features still work: shadows, lightmaps, fog, decals, Forward+ punctual lighting. The video light is added on top.
 
 > [!IMPORTANT]
-> Only **one** `VideoAreaLightSource` may be active per scene. The component pushes a fixed set of global shader uniforms; two active components fight each other. Symptoms include flickering or no contribution at all.
+> Only **one** `VideoAreaLightSource` may be active per scene. Two active components will fight each other and you'll see flickering or no light at all.
 
 > [!TIP]
-> Unity's default Quad mesh has its visible face on `-transform.forward`, so a Quad with rotation 0 typically needs **Flip Normal = ON**. If you're unsure, temporarily set **Two Sided = ON**: if contribution appears, find the right Flip Normal value and return Two Sided to OFF (one-sided is cheaper and physically correct for a video panel).
+> Unity's default Quad mesh has its visible face on the opposite side of its transform, so for a Quad you usually want **Flip Normal = ON**. If you're unsure, temporarily set **Two Sided = ON**: if the light appears, you've got the right setup — find the correct Flip Normal value and switch Two Sided back off.
+
+## Occlusion: keeping reflections where they belong
+
+In a venue with multiple rooms, the screen's reflections will land on every surface in the world by default — including a glossy bar floor in the lobby or a metal wall behind a partition. VideoAreaLight ships two tools to bound that.
+
+### Zone Mask (start here)
+
+Defines the outer boundary of where the screen's lighting and reflections are allowed to land. Cheap and effective — handles most cases on its own.
+
+- Click **Create Zone Mask** in the broadcaster's inspector. It drops a `VAL_ZoneMask` prefab as a sibling of the broadcaster and links it up automatically.
+- Or right-click in the Hierarchy → **Video Area Light → Zone Mask** to create one independently.
+- Resize the BoxCollider to encompass the venue with a small margin. Rotation and scale of the box are honoured, so you can tilt it to fit angled rooms.
+- Adjust **Zone Feather** on the broadcaster for a softer edge at the boundary.
+
+### Probe Volume (only if needed)
+
+Captures occlusion from awkward indoor geometry — dance-floor steps, mezzanine undersides, pillars, equipment cases — that a Zone Mask alone can't handle. Generates a small baked 3D visibility texture. Static props inside a volume's bounds also cast shadows on the surfaces below them automatically; no per-object setup needed.
+
+- Click **Add Probe Volume** in the broadcaster's inspector, or right-click Hierarchy → **Video Area Light → Probe Volume**.
+- Up to four can run at once. Mix one large coarse volume for the whole venue with smaller fine-detail volumes around the spots that need them.
+- Click **Bake This Volume** in the volume's inspector. Re-bake when the screen, the volume, or any geometry moves. **Tools → VideoAreaLight → Bake Visibility** bakes every volume in the scene at once.
+- Each volume saves a Texture3D asset next to the active scene.
+
+For deeper guidance — sizing recipes, voxel-size tradeoffs, memory tables — see [`Documentation~/Occlusion.md`](Packages/com.towneh.videoarealight/Documentation~/Occlusion.md).
 
 ## Package contents
 
@@ -57,24 +80,32 @@ VideoAreaLight/
 ├── CHANGELOG.md
 ├── Runtime/
 │   ├── com.towneh.videoarealight.Runtime.asmdef
-│   ├── Prefab/
-│   │   └── VideoAreaLight.prefab       pre-configured broadcaster
+│   ├── Prefabs/
+│   │   ├── VAL_ZoneMask.prefab            BoxCollider preset for analytic occlusion
+│   │   └── VAL_ProbeVolume.prefab         empty probe volume for baked occlusion
 │   ├── Scripts/
-│   │   └── VideoAreaLightSource.cs     broadcaster MonoBehaviour
+│   │   ├── VideoAreaLightSource.cs        broadcaster MonoBehaviour
+│   │   └── VideoAreaLightProbeVolume.cs   cascading visibility-volume host
 │   └── Shaders/
-│       ├── RectAreaLight.hlsl          core math include
-│       ├── VideoAreaLight_Lit.shader   drop-in URP/Lit-compatible shader
-│       └── VideoAreaLight_SG.hlsl      Shader Graph custom-function entry point
+│       ├── RectAreaLight.hlsl             core math include
+│       ├── VideoAreaLight_Lit.shader      drop-in URP/Lit-compatible shader
+│       └── VideoAreaLight_SG.hlsl         Shader Graph custom-function entry point
 ├── Editor/
 │   ├── com.towneh.videoarealight.Editor.asmdef
-│   ├── VideoAreaLightLitGUI.cs         custom material inspector
-│   ├── PoiyomiModuleInstaller.cs       Tools menu: install/uninstall Poiyomi module
-│   └── IntegrationMenuVisibility.cs    auto-hides shader-integration menus when host shader missing
+│   ├── VideoAreaLightSourceEditor.cs      broadcaster inspector + empty-state nudges
+│   ├── VideoAreaLightProbeVolumeEditor.cs probe volume inspector + bake button
+│   ├── VideoAreaLightProbeVolumeBaker.cs  visibility baker (RaycastCommand jobs)
+│   ├── VideoAreaLightLitGUI.cs            custom material inspector
+│   ├── VideoAreaLightMenu.cs              GameObject > Video Area Light menu items
+│   ├── PoiyomiModuleInstaller.cs          Tools menu: install/uninstall Poiyomi module
+│   └── IntegrationMenuVisibility.cs       auto-hides shader-integration menus when host shader missing
 ├── Documentation~/
-│   └── PoiyomiIntegration.md           full guide for the Poiyomi Pro integration
+│   ├── PoiyomiIntegration.md              guide for the Poiyomi Pro integration
+│   ├── Occlusion.md                       occlusion guide and recipes
+│   └── FutureIdeas.md                     forward-looking ideas not yet shipped
 └── Samples~/
-    ├── ExampleScene/                   importable demo scene
-    └── PoiyomiIntegration/             Poiyomi Pro Modular Shader template
+    ├── ExampleScene/                      importable demo scene
+    └── PoiyomiIntegration/                Poiyomi Pro Modular Shader template
 ```
 
 ## Poiyomi Pro integration
@@ -86,7 +117,7 @@ If your scene uses Poiyomi Pro, VideoAreaLight ships a Modular Shader module so 
 
 Then toggle **Video Area Light Enabled** on the materials you want lit. The same `VideoAreaLightSource` broadcaster drives both Poiyomi and `VideoAreaLight/Lit` materials — globals are global; you don't need a second component.
 
-**Full guide:** [`Packages/com.towneh.videoarealight/Documentation~/PoiyomiIntegration.md`](Packages/com.towneh.videoarealight/Documentation~/PoiyomiIntegration.md) — covers the mental model (shader-scoped, not material-scoped), the confirmation dialog, locking interaction, uninstall, and troubleshooting.
+**Full guide:** [`Packages/com.towneh.videoarealight/Documentation~/PoiyomiIntegration.md`](Packages/com.towneh.videoarealight/Documentation~/PoiyomiIntegration.md) — covers the install flow, shader regeneration, Thry lock interaction, uninstall, and troubleshooting.
 
 ## Shader Graph alternative
 
@@ -136,66 +167,59 @@ Club video wall on a glossy floor: `Max Intensity 50`, `Intensity Curve 1.0`, fl
 
 ## Performance
 
-Per-pixel: ~60–90 ALU instructions. No LUT fetches. With cookie ON, one extra mip-level texture sample.
+Cheap per-pixel: a few dozen math ops and (if Use Cookie is on) one texture sample. No lookup tables, no precomputed data.
 
-At 90 Hz, ~2k per eye, with one area light:
+Indicative GPU time at 90 Hz, ~2k per eye, with one screen:
 
 | Platform                  | Floor only        | Full receiving set        |
 |---------------------------|-------------------|---------------------------|
 | PCVR (RTX 30/40 class)    | `0.10 – 0.30 ms`  | `0.40 – 0.90 ms`          |
 | Quest 3 standalone        | `0.40 – 1.00 ms`  | `1.20 – 2.50 ms` (tight)  |
 
-Cost levers, in order of impact: number of materials using the shader → cookie ON/OFF → surface gloss (rough surfaces still pay the eval cost for nearly-invisible highlights — prefer to skip).
+The biggest cost lever is how many materials use the shader. Then Use Cookie on/off, then how glossy the surface is — even rough surfaces pay the same eval cost despite producing a near-invisible highlight, so it's better to keep the shader on the surfaces that actually benefit from it.
 
 ## Known limitations
 
-- Highlight at **Smoothness > 0.95**: less stretched than a true LTC integration would produce. Invisible at Smoothness < 0.85.
-- **Cookie sampling is point-sampled** at the MRP UV. Looks correct on glossy floors and metals; on a perfect mirror, a multi-tap or LTC-textured integral would be more accurate.
-- **Single area light per scene.** Multiple screens would need namespaced globals or an array-and-loop in the shader.
-- **URP-only.** Won't compile against BIRP without changes.
-- With **Contribute GI = ON + baked Lighting Mode**, this realtime contribution adds on top of baked light — can over-bright. For the dance floor, consider Contribute GI = OFF.
+- **Highlight at Smoothness > 0.95** is slightly less elongated than a perfect mirror would show, and barely visible below Smoothness 0.85.
+- **One screen per scene.** Multiple `VideoAreaLightSource` components fight each other.
+- **URP only.** The Built-in Render Pipeline isn't supported.
+- If a receiver has **Contribute GI** on with a baked lighting mode, the realtime contribution stacks on top of any baked light from this screen — that surface can end up too bright. Disable Contribute GI on the receiver if it looks over-lit.
 
 ## Troubleshooting
 
 <details>
-<summary><strong>No contribution visible at all</strong></summary>
+<summary><strong>No light visible at all</strong></summary>
 
-1. Cyan gizmo points INTO the room. If not, toggle Flip Normal.
-2. Only **one** `VideoAreaLightSource` is active in the scene.
-3. Receiving material's Shader is `VideoAreaLight/Lit` (or its Shader Graph wires the Custom Function output into Emission).
+1. The cyan gizmo points into the room (toggle **Flip Normal** if not).
+2. Only one `VideoAreaLightSource` is active in the scene.
+3. Receiving materials use the `VideoAreaLight/Lit` shader (or their Shader Graph wires the Custom Function output into Emission).
 4. Video Texture is assigned and the VideoPlayer is playing.
-5. Max Intensity is non-trivial (try `50`).
-6. As a sanity check, set Two Sided = ON. If contribution appears, orientation was the issue; find the right Flip Normal value, then return Two Sided to OFF.
+5. Max Intensity is high enough (try `50`).
+6. Sanity check: set **Two Sided** to ON. If light appears, the screen is just facing the wrong way — pick the correct Flip Normal value, then turn Two Sided back off.
 </details>
 
 <details>
-<summary><strong>Highlight in the wrong place / mirrored / behind the screen</strong></summary>
+<summary><strong>Highlight is in the wrong place, mirrored, or behind the screen</strong></summary>
 
-Screen Axis is wrong (XY for Quad, XZ for Plane), or the quad's visible face is on the opposite side — toggle Flip Normal.
+Screen Axis is wrong (XY for a Quad, XZ for a Plane), or the screen is facing the wrong way — toggle Flip Normal.
 </details>
 
 <details>
-<summary><strong>Highlight is right shape but wrong colour</strong></summary>
+<summary><strong>Highlight is the right shape but the wrong colour</strong></summary>
 
-With Use Cookie OFF you get the average colour — that's expected. Tick **Use Cookie** to sample the actual video.
+With Use Cookie off you get the screen's average colour — that's expected. Tick **Use Cookie** to sample the actual video.
 </details>
 
 <details>
-<summary><strong>Cookie too sharp / too blurry</strong></summary>
+<summary><strong>Highlight pops or snaps as the camera moves</strong></summary>
 
-Cookie mip is `roughness * 7`. Adjust the multiplier in `RectAreaLight.hlsl` (`VAL_SpecularContribution`, around `0.5..2`).
-</details>
-
-<details>
-<summary><strong>Highlight pops as the camera moves</strong></summary>
-
-MRP closest-point clamp can briefly snap when the reflection ray crosses a rectangle edge. Most visible at Smoothness > 0.9. Lower Smoothness slightly or raise Response Time.
+Most visible at Smoothness > 0.9. Lower Smoothness slightly or raise Response Time.
 </details>
 
 <details>
 <summary><strong>Performance dips on Quest</strong></summary>
 
-Restrict the shader to the dance floor only, set Use Cookie OFF on everything else.
+Use the `VideoAreaLight/Lit` shader only on the dance floor and a few key glossy surfaces; keep Use Cookie off on the rest.
 </details>
 
 ## License

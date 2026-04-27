@@ -10,7 +10,7 @@ This guide covers the Poiyomi Pro Modular Shader integration that ships with the
 
 ## Two-step user flow
 
-The integration is split into two actions because shader regeneration is not free — it triggers Unity's shader-variant recompiler, which scales with material count × keyword combos. Doing it on demand keeps cost proportional to what you actually use.
+The integration is split into two actions so you only pay the cost of regenerating shaders for materials you actually want lit by the screen.
 
 ### Step 1 — Install (one-time per project)
 
@@ -61,7 +61,7 @@ What it does internally:
 
 Open any Poiyomi material whose shader was regenerated. Scroll to the **Video Area Light** section.
 
-- **Video Area Light Enabled** — master toggle. Default OFF. The `//ifex _VideoAreaLightEnabled!=1` envelope ensures materials with the toggle off pay nothing at runtime.
+- **Video Area Light Enabled** — master toggle. Default OFF. Materials with the toggle off pay nothing at runtime; the section just appears in their inspector.
 - **Sample Video Cookie for Specular** — when on, the highlight reflects the actual video content. When off, only the average broadcast colour is used.
 - **Diffuse Multiplier** — scales the diffuse contribution.
 - **Specular Multiplier** — scales the specular highlight.
@@ -129,7 +129,7 @@ Apply must run **before** the bundle build, so the bundled shader contains the r
 <details>
 <summary><strong>The menu items appear even though I don't have Poiyomi installed</strong></summary>
 
-They shouldn't — `IntegrationMenuVisibility.cs` removes them at editor startup if Poiyomi types aren't loadable, and forces a main-menu rebuild so the entries don't linger under `Tools/...`. If they're still appearing after a domain reload, please open an issue with your Unity version; either `Menu.RemoveMenuItem` or `Menu.UpdateAllMenus` (both reached via reflection because they're `internal` in Unity 6) may have changed signature.
+They shouldn't — the package hides them automatically when Poiyomi isn't installed. If they still appear after Unity reloads, please open an issue with your Unity version.
 </details>
 
 ## How the integration works (under the hood)

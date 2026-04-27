@@ -6,45 +6,54 @@ using UnityEngine.Rendering;
 public class VideoAreaLightSource : MonoBehaviour
 {
     [Header("Source")]
-    [Tooltip("The render texture the VideoPlayer writes to. Used as the cookie texture and sampled for average colour.")]
+    [Tooltip("Drag your VideoPlayer's render texture in here. Drives the light's colour and reflection image.")]
     public Texture videoTexture;
 
-    [Header("Screen Geometry")]
-    [Tooltip("Local-space half size of the screen face. For a Unity Quad mesh, leave at (0.5, 0.5). For a stretched 16:9 quad, divide one axis by aspect.")]
+    [Header("Screen")]
+    [Tooltip("Half the screen's local size. Leave at (0.5, 0.5) for a default Quad. For a stretched 16:9 quad, divide one axis by the aspect ratio.")]
     public Vector2 localHalfSize = new Vector2(0.5f, 0.5f);
-    [Tooltip("Local axis convention. XY for Unity Quad mesh (default). XZ for Unity Plane mesh.")]
+    [Tooltip("Which axes the screen faces along. XY for a Quad mesh, XZ for a Plane mesh.")]
     public Axis screenAxis = Axis.XY;
     public enum Axis { XY, XZ }
-    [Tooltip("Two-sided emitter. If false, the area light only emits from the +normal side of the screen face.")]
+    [Tooltip("Lights both sides of the screen. Leave off for a normal one-sided panel — it's faster and physically correct.")]
     public bool twoSided = false;
-    [Tooltip("Flip the screen's emit direction. Default convention is transform.forward (XY axis) or transform.up (XZ axis). " +
-             "Unity's default Quad mesh has its visible face on the OPPOSITE side, so for a Quad you usually want this ON.")]
+    [Tooltip("Flips which side the light shines from. Unity's default Quad usually needs this ON.")]
     public bool flipNormal = false;
 
     [Header("Sampling")]
-    [Tooltip("Frequency at which the average colour is sampled from the video.")]
+    [Tooltip("How often (per second) the video's average colour is read. 15 is plenty; raising it just costs more.")]
     [Range(1f, 60f)] public float sampleRate = 15f;
-    [Tooltip("Seconds for the broadcast colour to settle on a new average. 0 = snappy, larger = smoother.")]
+    [Tooltip("How quickly the light reacts to colour changes. 0 is snappy, higher is smoother.")]
     [Range(0f, 1f)] public float responseTime = 0.15f;
 
     [Header("Intensity")]
-    [Tooltip("Light intensity multiplier at full white video.")]
+    [Tooltip("Light brightness when the video is fully white. Biggest lever — try 30–100 for clubs, more if you're using bloom.")]
     public float maxIntensity = 4f;
-    [Tooltip("Light intensity multiplier at full black video.")]
+    [Tooltip("Light brightness when the video is fully black. Leave at 0 for a natural fade-out.")]
     public float minIntensity = 0f;
-    [Tooltip("Power curve on luminance. >1 darkens midtones, <1 lifts them.")]
+    [Tooltip("Shapes the brightness response. Above 1 darkens midtones for punchier contrast; below 1 lifts them.")]
     [Range(0.25f, 4f)] public float intensityCurve = 1.5f;
-    [Tooltip("Boost saturation of the broadcast colour. 1 = pass-through.")]
+    [Tooltip("Boosts the colour saturation of the light. 1 leaves it as-is.")]
     [Range(1f, 3f)] public float saturationBoost = 1.4f;
 
-    static readonly int _PositionsId    = Shader.PropertyToID("_VAL_Positions");
-    static readonly int _ColorId        = Shader.PropertyToID("_VAL_Color");
-    static readonly int _IntensityId    = Shader.PropertyToID("_VAL_Intensity");
-    static readonly int _NormalId       = Shader.PropertyToID("_VAL_Normal");
-    static readonly int _CookieTexId    = Shader.PropertyToID("_VAL_CookieTex");
-    static readonly int _TwoSidedId     = Shader.PropertyToID("_VAL_TwoSided");
-    static readonly int _ValidId        = Shader.PropertyToID("_VAL_Valid");
-    static readonly int _CookieMatrixId = Shader.PropertyToID("_VAL_CookieWorldToUV");
+    [Header("Zone Mask")]
+    [Tooltip("Drag a BoxCollider here to bound the screen's lighting to your venue. Anything outside the box stays dark — the cheapest way to stop reflections leaking into other rooms. The collider's rotation and scale are respected, so you can tilt the box to fit angled rooms.")]
+    public BoxCollider zoneVolume;
+    [Tooltip("Softens the edge of the Zone Mask. 0 is a hard cut at the wall; around 0.1 gives a subtle fade.")]
+    [Range(0f, 2f)] public float zoneFeather = 0.1f;
+
+    static readonly int _PositionsId      = Shader.PropertyToID("_VAL_Positions");
+    static readonly int _ColorId          = Shader.PropertyToID("_VAL_Color");
+    static readonly int _IntensityId      = Shader.PropertyToID("_VAL_Intensity");
+    static readonly int _NormalId         = Shader.PropertyToID("_VAL_Normal");
+    static readonly int _CookieTexId      = Shader.PropertyToID("_VAL_CookieTex");
+    static readonly int _TwoSidedId       = Shader.PropertyToID("_VAL_TwoSided");
+    static readonly int _ValidId          = Shader.PropertyToID("_VAL_Valid");
+    static readonly int _CookieMatrixId   = Shader.PropertyToID("_VAL_CookieWorldToUV");
+    static readonly int _ZoneEnabledId    = Shader.PropertyToID("_VAL_ZoneEnabled");
+    static readonly int _WorldToZoneId    = Shader.PropertyToID("_VAL_WorldToZone");
+    static readonly int _ZoneHalfExtentsId = Shader.PropertyToID("_VAL_ZoneHalfExtents");
+    static readonly int _ZoneFeatherId    = Shader.PropertyToID("_VAL_ZoneFeather");
 
     readonly Vector4[] _corners = new Vector4[4];
 
@@ -190,7 +199,32 @@ public class VideoAreaLightSource : MonoBehaviour
 
         if (videoTexture != null) Shader.SetGlobalTexture(_CookieTexId, videoTexture);
 
+        PushZoneGlobals();
+
         Shader.SetGlobalFloat(_ValidId, 1f);
+    }
+
+    void PushZoneGlobals()
+    {
+        if (zoneVolume == null)
+        {
+            Shader.SetGlobalFloat(_ZoneEnabledId, 0f);
+            return;
+        }
+
+        // worldToLocalMatrix already undoes the collider transform's position,
+        // rotation and lossyScale, so a world point lands in the collider's
+        // local space where BoxCollider.size is the box extent. Translate by
+        // -center to recenter on the actual box pivot — then the test reduces
+        // to abs(localPos) < halfExtents.
+        Matrix4x4 worldToZone = Matrix4x4.Translate(-zoneVolume.center)
+                              * zoneVolume.transform.worldToLocalMatrix;
+        Vector3 halfExtents = 0.5f * zoneVolume.size;
+
+        Shader.SetGlobalFloat(_ZoneEnabledId, 1f);
+        Shader.SetGlobalMatrix(_WorldToZoneId, worldToZone);
+        Shader.SetGlobalVector(_ZoneHalfExtentsId, halfExtents);
+        Shader.SetGlobalFloat(_ZoneFeatherId, zoneFeather);
     }
 
     void OnAvgReadback(AsyncGPUReadbackRequest req)
@@ -226,5 +260,13 @@ public class VideoAreaLightSource : MonoBehaviour
         if (flipNormal) n = -n;
         Gizmos.color = Color.cyan;
         Gizmos.DrawLine(transform.position, transform.position + n * 0.5f);
+
+        if (zoneVolume != null)
+        {
+            Gizmos.matrix = zoneVolume.transform.localToWorldMatrix;
+            Gizmos.color = new Color(0.3f, 0.8f, 1f, 0.6f);
+            Gizmos.DrawWireCube(zoneVolume.center, zoneVolume.size);
+            Gizmos.matrix = prev;
+        }
     }
 }

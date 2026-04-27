@@ -36,7 +36,7 @@ _VideoAreaLight_SpecularMultiplier ("Specular Multiplier", Range(0, 4)) = 1.0
         float3 _val_specular = 0;
 
         // Bent normal feeds the diffuse polygon-irradiance integral when
-        // available, matching how LTCGI handles ambient occlusion.
+        // available, so occluded areas get direction-aware diffuse falloff.
         float3 _val_normal = poiMesh.normals[1];
     #ifdef POI_BENTNORMALMAP
         if (poiMesh.hasBentNormal) _val_normal = poiMesh.bentNormal;
