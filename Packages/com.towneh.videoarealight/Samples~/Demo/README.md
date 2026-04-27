@@ -85,10 +85,10 @@ Demo
 ├── Lighting
 │   ├── VAL_Source      (Quad MeshRenderer + VideoAreaLightSource on ONE GameObject — see Implementation gotchas)
 │   ├── VAL_ZoneMask    (BoxCollider sized to the venue's bounding rectangle — main + corridor + spawn)
-│   ├── VAL_Probe_Coarse (covers main + corridor + spawn at 10cm voxels — venue-wide backstop)
-│   ├── VAL_Probe_Corridor (corridor A near-doorway region at 5cm voxels, priority 5)
-│   ├── VAL_Probe_Fine  (around DJ booth + south wall up to ceiling at 2.5cm voxels, priority 10)
-│   ├── VAL_Probe_BoothFloor (tight box around the booth-floor interface at 1cm voxels, priority 15)
+│   ├── VAL_Probe_Coarse (covers main + corridor + spawn at 10cm voxels — venue-wide backstop, Scalar encoding)
+│   ├── VAL_Probe_Corridor (corridor A near-doorway region at 5cm voxels, priority 5, Scalar encoding)
+│   ├── VAL_Probe_Fine  (around DJ booth + south wall up to ceiling at 2.5cm voxels, priority 10, Quadrant encoding)
+│   ├── VAL_Probe_BoothFloor (tight box around the booth-floor interface at 1cm voxels, priority 15, Quadrant encoding)
 │   └── SpawnFill       (warm Spot, range 4m, contained to spawn)
 └── Camera              (just inside main-room doorway, looking N)
 ```
@@ -136,6 +136,29 @@ meshes, add a MeshCollider before baking.
 Bakes are static snapshots. Nothing detects staleness for you. After any
 geometry change, run `Tools > VideoAreaLight > Bake Visibility` (all
 volumes) or use a volume's "Bake This Volume" inspector button (one).
+
+### 5. Encoding mode is per-volume; mix to taste.
+
+Each probe volume's `Encoding` field is independent. The Demo uses both
+modes deliberately:
+
+- **Scalar** (`VAL_Probe_Coarse`, `VAL_Probe_Corridor`) — 1 byte/voxel.
+  The package's drop-in default. Treats every direction equally and
+  produces shadows whose *position* tracks geometry but whose *shape*
+  can over-extend (a wall in scalar shadow often reaches taller than
+  the actual occluder, because scalar visibility can't tell which part
+  of the screen is occluded).
+- **Quadrant** (`VAL_Probe_Fine`, `VAL_Probe_BoothFloor`) — 4 bytes/voxel.
+  Stores per-screen-quadrant visibility, bilerped at runtime against
+  the fragment's relevant screen UV. Produces correct directional
+  shadows on surfaces facing the source — the speaker shadows on the
+  south wall behind the booth track the actual speaker height instead
+  of stretching toward the ceiling. Costs 4× memory and benefits from
+  higher `samplesPerVoxel` (the demo uses 64 for Quadrant, 16 for Scalar).
+
+The mix-and-match pattern is the recommended one: Scalar where coverage
+is venue-wide, Quadrant where directional accuracy reads strongest
+(close-up shots on walls or floors with directional shadow shapes).
 
 ## Bake notes
 

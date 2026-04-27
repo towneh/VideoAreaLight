@@ -23,7 +23,7 @@ Other observations: per-voxel SH₁ direction noise produced visible voxel-grid 
 
 **Verdict:** structurally limited. L2 (9 coefficients) might fix the dominant-direction saturation but at ~12× memory and proportional bake time.
 
-### Attempt 2 — Per-screen-quadrant encoding (`feature/quadrant-visibility`)
+### Attempt 2 — Per-screen-quadrant encoding *(merged: now an opt-in encoding mode)*
 
 4-channel RGBA32 storage: visibility from the voxel to each of four screen UV quadrants (R = BL, G = BR, B = TL, A = TR). Baker bins each ray by its target screen UV quadrant. Shader bilinear-reconstructs at the fragment's actual relevant screen UV — the orthogonal projection of `worldPos` onto the screen plane for diffuse, and the existing MRP UV for specular.
 
@@ -31,26 +31,26 @@ The conceptual difference vs SH/cube encodings: this *isn't trying to represent 
 
 **Headline win:** speaker shadows track the correct height *and* the lectern shadow tracks its own (different) height in the same scene — they read as visually distinct heights on the wall. No SH-style saturation problem because the encoding is direct, not a band-limited approximation. No visible voxel-grid banding at 64 samples (unlike SH, where SH₁ direction noise amplified into the reconstruction).
 
-**Headline cost:** 4× per-voxel storage. The demo's bake assets grow from ~10 MB (scalar) to ~40 MB (quadrant), past the rough 17 MB threshold flagged elsewhere as "unacceptable for UGC distribution."
+**Cost:** 4× per-voxel storage. The demo's bake assets grow from ~10 MB (scalar) to ~40 MB (quadrant) for the volumes that opt in. Above the rough 17 MB threshold flagged earlier as "unacceptable for UGC distribution" — which is why the encoding shipped as **opt-in per volume**, not as the default. Each `VideoAreaLightProbeVolume` chooses Scalar or Quadrant; mix per volume so the venue-wide coarse stays cheap and only the fine volumes around problem geometry pay the directional-accuracy cost.
 
 **Caveats:**
 - Source-shape-specific. Only valid for a rectangular emitter. Disc lights, polyhedral lights, or other shapes would need a different encoding. The package is rectangular by design so this isn't a real practical limit, but it's not a general-purpose visibility format.
 - Resolution is screen-quadrant-coarse. A booth occluding a small region inside a single quadrant gets averaged with the rest of that quadrant. If finer detail is needed, escalate to 8 cells (2 RGBA textures = 8× scalar) or 16 cells (4 RGBA textures = 16× scalar).
-- Sub-quadrant sample variance: with N total rays and 4 quadrants, ~N/4 rays per bucket. At 16 total (the legacy scalar default), per-quadrant variance is high. The branch defaults to 64 samples for this reason.
+- Sub-quadrant sample variance: with N total rays and 4 quadrants, ~N/4 rays per bucket. At 16 total (the scalar default), per-quadrant variance is too high. The Quadrant path defaults to 64 samples for this reason; the demo builder sets `samplesPerVoxel` accordingly per encoding mode.
 
-**Verdict:** correct for the package's actual problem, gated on memory cost. Worth merging when memory budgets relax, or for use cases where ~40 MB on a small demo is acceptable.
+**Status:** shipped as an opt-in encoding mode. The `feature/quadrant-visibility` branch is preserved for reference (it captures the step-by-step development: format plumb → quadrant baker → shader bilerp → samples bump → MRP-saturation visibility fade), but main now contains the merged result with the encoding choice exposed per volume. The Demo sample uses both modes deliberately to showcase the mix-and-match pattern.
 
 ### Comparison summary
 
 For the demo scene's "speaker shadow on the south wall behind the booth" view:
 
-| Approach | Wall shadow shape | Voxel banding | Memory | Verdict |
+| Approach | Wall shadow shape | Voxel banding | Memory | Status |
 |---|---|---|---|---|
-| Scalar (`main`) | Correct *position*, wrong *height* (over-extends near ceiling) | None | 1× | Shipped |
+| Scalar | Correct *position*, wrong *height* (over-extends near ceiling) | None | 1× | Default; shipped |
 | SH L1 (`feature/anisotropic-visibility`) | Nearly absent — saturation kills the directional reconstruction at the wall's normal | Visible at 64 samples | 4× | Structurally limited; not merged |
-| Quadrant (`feature/quadrant-visibility`) | Correct height, distinct speaker vs lectern shadows, soft physical penumbra | None | 4× | Best result; gated on memory cost |
+| Quadrant | Correct height, distinct speaker vs lectern shadows, soft physical penumbra | None | 4× | Opt-in; shipped as per-volume `Encoding` mode |
 
-The shipped scalar visibility produces the dramatic "shadow goes to the ceiling" result that's recognisable in a club setting and arguably reads as stylised, but it isn't physically right. Quadrant produces the physically-right result but at memory cost the package can't currently afford for distribution.
+The default Scalar encoding produces the dramatic "shadow goes to the ceiling" result that's recognisable in a club setting and arguably reads as stylised. Quadrant produces the physically-right result; authors choose per volume which trade-off matches their case.
 
 ### Other directions, not yet tried
 

@@ -1,6 +1,32 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum VALVisibilityEncoding
+{
+    /// <summary>
+    /// Single scalar value per voxel = fraction of the screen rectangle
+    /// visible. 1 byte/voxel; cheapest and the default. Loses information
+    /// about *which part* of the screen is occluded, so partial-occlusion
+    /// shadows can over-extend on receiving surfaces (a wall in scalar shadow
+    /// often reaches taller than the actual occluder) and the floor's
+    /// specular reflection can't track which point of the screen is blocked
+    /// for the reflected ray.
+    /// </summary>
+    Scalar,
+
+    /// <summary>
+    /// Visibility per screen quadrant — R = bottom-left, G = bottom-right,
+    /// B = top-left, A = top-right. 4 bytes/voxel (4× the storage of Scalar).
+    /// At runtime the shader bilerps the four channels at the fragment's
+    /// relevant screen UV (projection of worldPos for diffuse, MRP UV for
+    /// specular). Produces correct directional shadows for surfaces facing
+    /// the source — the typical wall-shadow case where Scalar fails. Bake
+    /// time also ~4× because samplesPerVoxel needs to be higher (~64) to
+    /// keep per-quadrant variance low.
+    /// </summary>
+    Quadrant,
+}
+
 [ExecuteAlways]
 [DisallowMultipleComponent]
 public class VideoAreaLightProbeVolume : MonoBehaviour
@@ -16,7 +42,7 @@ public class VideoAreaLightProbeVolume : MonoBehaviour
     [Header("Bake Quality")]
     [Tooltip("Voxel size in metres. Smaller means sharper detail and longer bakes. 0.1 is great for room-scale; drop to 0.05 around fine geometry like steps or thin walls.")]
     [Min(0.01f)] public float voxelSize = 0.1f;
-    [Tooltip("How many rays each voxel fires at the screen during baking. More gives smoother edges; 16 is a good default.")]
+    [Tooltip("How many rays each voxel fires at the screen during baking. More gives smoother edges; 16 is a good default for Scalar encoding. For Quadrant, use ~64 (rays distribute across 4 buckets).")]
     [Range(1, 256)] public int samplesPerVoxel = 16;
     [Tooltip("Which physics layers count as light blockers — walls, floors, props. If your screen mesh has a collider, exclude its layer here.")]
     public LayerMask occluderMask = ~0;
@@ -24,6 +50,10 @@ public class VideoAreaLightProbeVolume : MonoBehaviour
     [Header("Slot")]
     [Tooltip("Which volumes win when more than four are in the scene. Higher-priority volumes are guaranteed to contribute; the rest are skipped. Useful for protecting fine-detail volumes from being dropped.")]
     public int priority = 0;
+
+    [Header("Encoding")]
+    [Tooltip("Scalar (default) is 1 byte per voxel and treats every direction equally. Quadrant is 4 bytes per voxel and stores per-screen-quadrant visibility, which produces correct directional shadows on surfaces facing the source. Mix per volume — typical pattern is Scalar for the venue-wide coarse volume and Quadrant for the fine volumes around problem geometry where directional accuracy matters.")]
+    public VALVisibilityEncoding encoding = VALVisibilityEncoding.Scalar;
 
     [Header("Bake Result")]
     [Tooltip("The baked visibility texture. Click 'Bake This Volume' below to generate it, or use Tools > VideoAreaLight > Bake Visibility to bake every volume in the scene.")]
@@ -44,6 +74,13 @@ public class VideoAreaLightProbeVolume : MonoBehaviour
         Shader.PropertyToID("_VAL_VisTex1"),
         Shader.PropertyToID("_VAL_VisTex2"),
         Shader.PropertyToID("_VAL_VisTex3"),
+    };
+    static readonly int[] _ModeIds =
+    {
+        Shader.PropertyToID("_VAL_VisMode0"),
+        Shader.PropertyToID("_VAL_VisMode1"),
+        Shader.PropertyToID("_VAL_VisMode2"),
+        Shader.PropertyToID("_VAL_VisMode3"),
     };
 
     // Active volume registry. The "leader" (priority-sorted head) is the only
@@ -113,6 +150,7 @@ public class VideoAreaLightProbeVolume : MonoBehaviour
 
         Shader.SetGlobalTexture(_TexIds[slot], bakedVisibility);
         Shader.SetGlobalMatrix(_MatrixIds[slot], m);
+        Shader.SetGlobalFloat(_ModeIds[slot], (float)encoding);
     }
 
     void OnDrawGizmosSelected()

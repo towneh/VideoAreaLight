@@ -60,6 +60,16 @@ float4x4 _VAL_WorldToVisUVW1;
 float4x4 _VAL_WorldToVisUVW2;
 float4x4 _VAL_WorldToVisUVW3;
 
+// Per-slot encoding mode. 0 = Scalar (R channel = visibility fraction),
+// 1 = Quadrant (RGBA channels = per-screen-quadrant visibility, bilerped
+// at runtime). Each volume sets its slot's mode independently, so a
+// scene can mix scalar (cheap, default) and quadrant (4× memory,
+// directionally accurate) volumes.
+float    _VAL_VisMode0;
+float    _VAL_VisMode1;
+float    _VAL_VisMode2;
+float    _VAL_VisMode3;
+
 // ---------------------------------------------------------------------------
 // Diffuse - polygon irradiance
 // ---------------------------------------------------------------------------
@@ -140,6 +150,22 @@ float VAL_DiffuseFormFactor(
     // magnitude here and apply one-sidedness via an explicit facing test
     // against the polygon plane below, in the public entry point.
     return abs(sum) / (2.0 * VAL_PI);
+}
+
+// ---------------------------------------------------------------------------
+// Per-quadrant visibility bilerp (Quadrant encoding mode)
+// ---------------------------------------------------------------------------
+
+// Quadrant-encoded visibility texture stores fractional visibility per
+// screen quadrant: R = BL (u<0.5, v<0.5), G = BR (u>=0.5, v<0.5),
+// B = TL (u<0.5, v>=0.5), A = TR (u>=0.5, v>=0.5). Bilerp gives a
+// per-uv visibility for the rectangle's contribution at runtime.
+float VAL_QuadrantVisibility(float4 quadrants, float2 uv)
+{
+    float2 t = saturate(uv);
+    float bottomRow = lerp(quadrants.r, quadrants.g, t.x);
+    float topRow    = lerp(quadrants.b, quadrants.a, t.x);
+    return lerp(bottomRow, topRow, t.y);
 }
 
 // ---------------------------------------------------------------------------
@@ -334,30 +360,64 @@ void VAL_EvaluateAreaLight(
 
     if (_VAL_Valid < 0.5) return;
 
-    // Combined visibility mask. Cheap early-outs for fragments the broadcaster
-    // can't reach: zone-collider boundary, baked volumetric visibility, or
-    // both. Skips the polygon integral and GGX work entirely when zero.
-    float zoneMask = 1.0;
+    float3 N = normalize(worldNormal);
+    float3 V = normalize(worldView);
+
+    float3 P0 = _VAL_Positions[0].xyz;
+    float3 P1 = _VAL_Positions[1].xyz;
+    float3 P2 = _VAL_Positions[2].xyz;
+    float3 P3 = _VAL_Positions[3].xyz;
+
+    // Zone OBB feather mask. Cheap analytic test; cuts entire venues out
+    // before any expensive math runs.
+    float zoneFalloff = 1.0;
     if (_VAL_ZoneEnabled > 0.5)
     {
         float3 zl = mul(_VAL_WorldToZone, float4(worldPos, 1.0)).xyz;
         float3 d = abs(zl) - _VAL_ZoneHalfExtents.xyz;
         float outside = length(max(d, 0.0));
-        zoneMask = 1.0 - saturate(outside / max(_VAL_ZoneFeather, 1e-4));
-        if (zoneMask <= 0.0) return;
+        zoneFalloff = 1.0 - saturate(outside / max(_VAL_ZoneFeather, 1e-4));
+        if (zoneFalloff <= 0.0) return;
     }
-    // Cascaded visibility volumes (up to 4). Each slot only contributes when
-    // worldPos lies inside its UVW box; outside, the slot multiplies by 1 so
-    // a small fine-grained volume can sit inside a larger coarse one without
-    // double-occluding. The count check skips inactive slots cleanly.
-    #define VAL_SAMPLE_VIS_SLOT(N) \
-        [branch] if (_VAL_VisCount > N) \
+
+    // Cascaded visibility volumes (up to 4). Each slot independently
+    // chooses Scalar or Quadrant encoding via _VAL_VisMode#:
+    //   Scalar (0):    sample .r once, multiply both diffuse and specular
+    //                  by the same scalar visibility (simplest, cheapest).
+    //   Quadrant (1):  sample 4-channel quadrant texture, bilerp at the
+    //                  fragment's relevant screen UV (orthogonal projection
+    //                  of worldPos for diffuse, MRP UV for specular).
+    //                  Produces correct directional shadows on surfaces
+    //                  facing the source.
+    // Slots multiply (cascading model). Slots whose UVW lies outside [0,1]
+    // contribute 1 to both, so a fine slot can sit inside a coarse one
+    // without double-occluding.
+    float2 diffuseUV  = mul(_VAL_CookieWorldToUV, float4(worldPos, 1.0)).xy;
+    float3 R_dir      = reflect(-V, N);
+    float3 _val_mrpWS; float2 specularUV; bool _val_mrpValid; float _val_mrpInside;
+    VAL_FindMRP(worldPos, R_dir, P0, P1, P2, P3, _VAL_Normal.xyz,
+                _val_mrpWS, specularUV, _val_mrpValid, _val_mrpInside);
+
+    float visDiffuse  = 1.0;
+    float visSpecular = 1.0;
+    #define VAL_SAMPLE_VIS_SLOT(SLOT) \
+        [branch] if (_VAL_VisCount > SLOT) \
         { \
-            float3 _val_uvw##N = mul(_VAL_WorldToVisUVW##N, float4(worldPos, 1.0)).xyz; \
-            if (all(_val_uvw##N >= 0.0) && all(_val_uvw##N <= 1.0)) \
+            float3 _val_uvw##SLOT = mul(_VAL_WorldToVisUVW##SLOT, float4(worldPos, 1.0)).xyz; \
+            if (all(_val_uvw##SLOT >= 0.0) && all(_val_uvw##SLOT <= 1.0)) \
             { \
-                zoneMask *= SAMPLE_TEXTURE3D(_VAL_VisTex##N, sampler_VAL_VisTex##N, _val_uvw##N).r; \
-                if (zoneMask <= 0.0) return; \
+                float4 _val_t##SLOT = SAMPLE_TEXTURE3D(_VAL_VisTex##SLOT, sampler_VAL_VisTex##SLOT, _val_uvw##SLOT); \
+                if (_VAL_VisMode##SLOT >= 0.5) \
+                { \
+                    visDiffuse  *= VAL_QuadrantVisibility(_val_t##SLOT, diffuseUV); \
+                    visSpecular *= VAL_QuadrantVisibility(_val_t##SLOT, specularUV); \
+                } \
+                else \
+                { \
+                    float _val_s##SLOT = _val_t##SLOT.r; \
+                    visDiffuse  *= _val_s##SLOT; \
+                    visSpecular *= _val_s##SLOT; \
+                } \
             } \
         }
     VAL_SAMPLE_VIS_SLOT(0)
@@ -366,13 +426,12 @@ void VAL_EvaluateAreaLight(
     VAL_SAMPLE_VIS_SLOT(3)
     #undef VAL_SAMPLE_VIS_SLOT
 
-    float3 N = normalize(worldNormal);
-    float3 V = normalize(worldView);
-
-    float3 P0 = _VAL_Positions[0].xyz;
-    float3 P1 = _VAL_Positions[1].xyz;
-    float3 P2 = _VAL_Positions[2].xyz;
-    float3 P3 = _VAL_Positions[3].xyz;
+    // Fade specular visibility at the MRP saturation boundary. Without
+    // this, the bilerp at saturated UV (Quadrant) or the .r read at
+    // saturated UV (Scalar) can produce an intensity kink along the
+    // floor curve where the reflection ray clips the screen edge,
+    // visible as a faint line bending with view direction.
+    float visSpecularEffective = lerp(1.0, visSpecular, _val_mrpInside);
 
     bool twoSided = _VAL_TwoSided > 0.5;
     float3 lightColor = _VAL_Color.rgb * _VAL_Intensity;
@@ -395,8 +454,8 @@ void VAL_EvaluateAreaLight(
         P0, P1, P2, P3,
         lightColor, twoSided, useCookie) * facingMask;
 
-    diffuseOut  *= zoneMask;
-    specularOut *= zoneMask;
+    diffuseOut  *= zoneFalloff * visDiffuse;
+    specularOut *= zoneFalloff * visSpecularEffective;
 }
 
 #endif // VAL_RECT_AREA_LIGHT_INCLUDED

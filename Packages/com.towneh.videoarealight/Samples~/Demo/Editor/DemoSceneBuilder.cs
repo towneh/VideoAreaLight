@@ -83,27 +83,40 @@ namespace VideoAreaLight.Samples.Demo
             var lighting = new GameObject("Lighting").transform;
             var src = BuildVALSource(lighting, mats, screenRT, placeholder);
             BuildZoneMask(lighting, src);
+            // Encoding choice per probe is the demo's headline showcase of
+            // the mix-and-match pattern: venue-wide volumes stay Scalar
+            // (cheap, the package's drop-in promise) while localized fine
+            // volumes around problem geometry use Quadrant (4× memory but
+            // correct directional shadows on walls and per-screen-UV
+            // accuracy in the floor's specular reflection).
             BuildProbeVolume(lighting, "VAL_Probe_Coarse",
                 center: new Vector3(1.5f, 1.75f, -2.5f),
                 size:   new Vector3(13.5f, 3.7f, 10.5f),
-                voxelSize: 0.1f, priority: 0);
+                voxelSize: 0.1f, priority: 0,
+                encoding: VALVisibilityEncoding.Scalar);
             // Fine probe Y range extends slightly below the floor so that
             // floor fragments (at Y=0) read between two voxel layers via
             // trilinear instead of clamping to a single layer — adds soft
             // bilinear smoothing on the Y axis at the floor surface.
+            // Quadrant encoding here gives the speaker shadows correct
+            // height-tracking on the south wall behind the booth.
             BuildProbeVolume(lighting, "VAL_Probe_Fine",
                 center: new Vector3(0f, 1.45f, -1.5f),
                 size:   new Vector3(4.0f, 3.1f, 4.0f),
-                voxelSize: 0.025f, priority: 10);
+                voxelSize: 0.025f, priority: 10,
+                encoding: VALVisibilityEncoding.Quadrant);
             // Third probe targeting the corridor's near-doorway visible
             // region — the corridor's back wall (L_WallS) and the floor/walls
             // of corridor A. The coarse probe covers this at 10cm but
             // produces muddy shadow edges; this 5cm probe tightens them.
-            // Priority 5 slots it between fine (10) and coarse (0).
+            // Stays Scalar — directional accuracy matters less here, and
+            // the coarse + corridor pair is the venue's load-bearing
+            // occlusion infrastructure.
             BuildProbeVolume(lighting, "VAL_Probe_Corridor",
                 center: new Vector3(0f, 1.5f, -4.5f),
                 size:   new Vector3(3.0f, 3.0f, 5.0f),
-                voxelSize: 0.05f, priority: 5);
+                voxelSize: 0.05f, priority: 5,
+                encoding: VALVisibilityEncoding.Scalar);
             // Fourth probe specifically for the booth-floor interface.
             // The fine probe at 2.5cm produces visible voxel-grid stepping
             // on the floor's shadow boundary at close viewing distance;
@@ -111,11 +124,14 @@ namespace VideoAreaLight.Samples.Demo
             // that actually needs it. Y range slightly below the floor for
             // bilinear smoothing. Priority 15 claims the highest slot —
             // these shadows are the most visually prominent and most
-            // expensive to lose if the slot count maxes out.
+            // expensive to lose if the slot count maxes out. Quadrant
+            // encoding here gives the floor's specular reflection accurate
+            // per-screen-UV occlusion for camera-near floor positions.
             BuildProbeVolume(lighting, "VAL_Probe_BoothFloor",
                 center: new Vector3(0f, 0.1f, -1.0f),
                 size:   new Vector3(3.2f, 0.4f, 1.5f),
-                voxelSize: 0.01f, priority: 15);
+                voxelSize: 0.01f, priority: 15,
+                encoding: VALVisibilityEncoding.Quadrant);
             BuildSpawnFill(lighting);
 
             BuildCamera();
@@ -558,7 +574,8 @@ namespace VideoAreaLight.Samples.Demo
         }
 
         static void BuildProbeVolume(Transform parent, string name,
-            Vector3 center, Vector3 size, float voxelSize, int priority)
+            Vector3 center, Vector3 size, float voxelSize, int priority,
+            VALVisibilityEncoding encoding = VALVisibilityEncoding.Scalar)
         {
             var go = new GameObject(name);
             go.transform.SetParent(parent, false);
@@ -567,8 +584,12 @@ namespace VideoAreaLight.Samples.Demo
             v.center = Vector3.zero; // we move via transform.position, not local center
             v.size = size;
             v.voxelSize = voxelSize;
-            v.samplesPerVoxel = 16;
+            // Quadrant encoding's per-quadrant variance scales as 1/sqrt(N/4)
+            // — needs roughly 4× the sample count of Scalar to match per-bucket
+            // density. Tune up further if directional artifacts surface.
+            v.samplesPerVoxel = encoding == VALVisibilityEncoding.Quadrant ? 64 : 16;
             v.priority = priority;
+            v.encoding = encoding;
         }
 
         static void BuildSpawnFill(Transform parent)

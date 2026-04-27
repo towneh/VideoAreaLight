@@ -80,7 +80,43 @@ public static class VideoAreaLightProbeVolumeBaker
         Vector3 stepY = t.TransformVector(new Vector3(0f, size.y / dy, 0f));
         Vector3 stepZ = t.TransformVector(new Vector3(0f, 0f, size.z / dz));
 
-        var data = new byte[dx * dy * dz];
+        // Encoding mode chooses storage format and per-voxel result math.
+        // Scalar:   1 byte/voxel, single visibility fraction.
+        // Quadrant: 4 bytes/voxel, visibility per screen quadrant.
+        bool isQuadrant = volume.encoding == VALVisibilityEncoding.Quadrant;
+
+        byte[] scalarData = null;
+        Color32[] quadData = null;
+        int[] sampleQuadrant = null;
+        int sQ0 = 0, sQ1 = 0, sQ2 = 0, sQ3 = 0;
+        float invQ0 = 0f, invQ1 = 0f, invQ2 = 0f, invQ3 = 0f;
+
+        if (isQuadrant)
+        {
+            quadData = new Color32[dx * dy * dz];
+
+            // Pre-classify each sample's screen UV into one of 4 quadrants.
+            // Quadrant ids: 0=BL, 1=BR, 2=TL, 3=TR. Constant across voxels
+            // because the stratified sample positions don't change.
+            sampleQuadrant = new int[sampleCount];
+            for (int s = 0; s < sampleCount; s++)
+            {
+                int q = (sampleUVs[s].x >= 0.5f ? 1 : 0) + (sampleUVs[s].y >= 0.5f ? 2 : 0);
+                sampleQuadrant[s] = q;
+                if      (q == 0) sQ0++;
+                else if (q == 1) sQ1++;
+                else if (q == 2) sQ2++;
+                else             sQ3++;
+            }
+            invQ0 = (sQ0 > 0) ? 1f / sQ0 : 0f;
+            invQ1 = (sQ1 > 0) ? 1f / sQ1 : 0f;
+            invQ2 = (sQ2 > 0) ? 1f / sQ2 : 0f;
+            invQ3 = (sQ3 > 0) ? 1f / sQ3 : 0f;
+        }
+        else
+        {
+            scalarData = new byte[dx * dy * dz];
+        }
 
         int sliceVoxels = dx * dy;
         int sliceRays = sliceVoxels * sampleCount;
@@ -136,17 +172,51 @@ public static class VideoAreaLightProbeVolumeBaker
                 for (int y = 0; y < dy; y++)
                 for (int x = 0; x < dx; x++)
                 {
-                    int blocked = 0;
-                    for (int s = 0; s < sampleCount; s++)
+                    int writeIdx = x + y * dx + z * dx * dy;
+                    if (isQuadrant)
                     {
-                        // Distance > 0 filter preserves the serial baker's degenerate-ray
-                        // semantics: skipped rays count as not-blocked.
-                        if (commands[idx].distance > 0f && hits[idx].colliderInstanceID != 0)
-                            blocked++;
-                        idx++;
+                        // Bin visibility by which screen quadrant each ray
+                        // targeted. Channel mapping: R=BL, G=BR, B=TL, A=TR.
+                        int v0 = 0, v1 = 0, v2 = 0, v3 = 0;
+                        for (int s = 0; s < sampleCount; s++)
+                        {
+                            bool degenerate = commands[idx].distance <= 0f;
+                            bool blocked = !degenerate && hits[idx].colliderInstanceID != 0;
+                            if (!blocked)
+                            {
+                                int q = sampleQuadrant[s];
+                                if      (q == 0) v0++;
+                                else if (q == 1) v1++;
+                                else if (q == 2) v2++;
+                                else             v3++;
+                            }
+                            idx++;
+                        }
+                        float vq0 = (sQ0 > 0) ? v0 * invQ0 : 1f;
+                        float vq1 = (sQ1 > 0) ? v1 * invQ1 : 1f;
+                        float vq2 = (sQ2 > 0) ? v2 * invQ2 : 1f;
+                        float vq3 = (sQ3 > 0) ? v3 * invQ3 : 1f;
+                        byte rByte = (byte)Mathf.Clamp(Mathf.RoundToInt(vq0 * 255f), 0, 255);
+                        byte gByte = (byte)Mathf.Clamp(Mathf.RoundToInt(vq1 * 255f), 0, 255);
+                        byte bByte = (byte)Mathf.Clamp(Mathf.RoundToInt(vq2 * 255f), 0, 255);
+                        byte aByte = (byte)Mathf.Clamp(Mathf.RoundToInt(vq3 * 255f), 0, 255);
+                        quadData[writeIdx] = new Color32(rByte, gByte, bByte, aByte);
                     }
-                    float vis = 1f - (float)blocked / sampleCount;
-                    data[x + y * dx + z * dx * dy] = (byte)Mathf.Clamp(Mathf.RoundToInt(vis * 255f), 0, 255);
+                    else
+                    {
+                        // Scalar: count blocked rays, store fraction visible.
+                        int blocked = 0;
+                        for (int s = 0; s < sampleCount; s++)
+                        {
+                            // Distance > 0 filter preserves the serial baker's degenerate-ray
+                            // semantics: skipped rays count as not-blocked.
+                            if (commands[idx].distance > 0f && hits[idx].colliderInstanceID != 0)
+                                blocked++;
+                            idx++;
+                        }
+                        float vis = 1f - (float)blocked / sampleCount;
+                        scalarData[writeIdx] = (byte)Mathf.Clamp(Mathf.RoundToInt(vis * 255f), 0, 255);
+                    }
                 }
 
                 processed += sliceVoxels;
@@ -176,14 +246,16 @@ public static class VideoAreaLightProbeVolumeBaker
         stopwatch.Stop();
         Debug.Log($"VideoAreaLight: {volumeTag}bake completed in {stopwatch.Elapsed.TotalSeconds:F1}s ({totalRays:N0} raycasts).");
 
-        var tex = new Texture3D(dx, dy, dz, TextureFormat.R8, false)
+        TextureFormat texFormat = isQuadrant ? TextureFormat.RGBA32 : TextureFormat.R8;
+        var tex = new Texture3D(dx, dy, dz, texFormat, false)
         {
             wrapMode = TextureWrapMode.Clamp,
             filterMode = FilterMode.Bilinear,
             anisoLevel = 0,
             name = $"VAL_Visibility_{volume.gameObject.scene.name}_{volume.gameObject.name}",
         };
-        tex.SetPixelData(data, 0);
+        if (isQuadrant) tex.SetPixelData(quadData, 0);
+        else            tex.SetPixelData(scalarData, 0);
         tex.Apply(false, true);
 
         if (volume.bakedVisibility != null && AssetDatabase.Contains(volume.bakedVisibility))
