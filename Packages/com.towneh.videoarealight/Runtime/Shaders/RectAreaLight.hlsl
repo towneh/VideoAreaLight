@@ -30,6 +30,36 @@ float    _VAL_TwoSided;
 float    _VAL_Valid;
 float4x4 _VAL_CookieWorldToUV;   // unused by MRP for sampling but kept for API parity
 
+// Optional zone mask. When _VAL_ZoneEnabled is set, fragments outside the
+// broadcaster's zone collider receive no contribution (lets walls block the
+// light from leaking into adjacent rooms). _VAL_WorldToZone maps world
+// space into the zone's local frame, recentered on the box's pivot, so the
+// test reduces to abs(localPos) < halfExtents.
+float    _VAL_ZoneEnabled;
+float4x4 _VAL_WorldToZone;
+float4   _VAL_ZoneHalfExtents;
+float    _VAL_ZoneFeather;
+
+// Optional baked visibility volumes. Up to 4 cascaded volumes can be active
+// at once; each volume owns one slot and contributes multiplicatively.
+// Fragments outside a slot's UVW bounds are unaffected by that slot
+// (multiplied by 1) — this lets authors mix one coarse venue-wide volume
+// with smaller fine volumes targeting problem areas, instead of paying
+// fine-resolution memory across the whole venue. Each voxel stores the
+// fraction of the screen rectangle visible from that world position.
+//
+// _VAL_VisCount tells the shader how many slots are populated (0 → none);
+// slots above that number cost nothing because their `if` block is skipped.
+TEXTURE3D(_VAL_VisTex0);  SAMPLER(sampler_VAL_VisTex0);
+TEXTURE3D(_VAL_VisTex1);  SAMPLER(sampler_VAL_VisTex1);
+TEXTURE3D(_VAL_VisTex2);  SAMPLER(sampler_VAL_VisTex2);
+TEXTURE3D(_VAL_VisTex3);  SAMPLER(sampler_VAL_VisTex3);
+int      _VAL_VisCount;
+float4x4 _VAL_WorldToVisUVW0;
+float4x4 _VAL_WorldToVisUVW1;
+float4x4 _VAL_WorldToVisUVW2;
+float4x4 _VAL_WorldToVisUVW3;
+
 // ---------------------------------------------------------------------------
 // Diffuse - polygon irradiance
 // ---------------------------------------------------------------------------
@@ -285,6 +315,38 @@ void VAL_EvaluateAreaLight(
 
     if (_VAL_Valid < 0.5) return;
 
+    // Combined visibility mask. Cheap early-outs for fragments the broadcaster
+    // can't reach: zone-collider boundary, baked volumetric visibility, or
+    // both. Skips the polygon integral and GGX work entirely when zero.
+    float zoneMask = 1.0;
+    if (_VAL_ZoneEnabled > 0.5)
+    {
+        float3 zl = mul(_VAL_WorldToZone, float4(worldPos, 1.0)).xyz;
+        float3 d = abs(zl) - _VAL_ZoneHalfExtents.xyz;
+        float outside = length(max(d, 0.0));
+        zoneMask = 1.0 - saturate(outside / max(_VAL_ZoneFeather, 1e-4));
+        if (zoneMask <= 0.0) return;
+    }
+    // Cascaded visibility volumes (up to 4). Each slot only contributes when
+    // worldPos lies inside its UVW box; outside, the slot multiplies by 1 so
+    // a small fine-grained volume can sit inside a larger coarse one without
+    // double-occluding. The count check skips inactive slots cleanly.
+    #define VAL_SAMPLE_VIS_SLOT(N) \
+        [branch] if (_VAL_VisCount > N) \
+        { \
+            float3 _val_uvw##N = mul(_VAL_WorldToVisUVW##N, float4(worldPos, 1.0)).xyz; \
+            if (all(_val_uvw##N >= 0.0) && all(_val_uvw##N <= 1.0)) \
+            { \
+                zoneMask *= SAMPLE_TEXTURE3D(_VAL_VisTex##N, sampler_VAL_VisTex##N, _val_uvw##N).r; \
+                if (zoneMask <= 0.0) return; \
+            } \
+        }
+    VAL_SAMPLE_VIS_SLOT(0)
+    VAL_SAMPLE_VIS_SLOT(1)
+    VAL_SAMPLE_VIS_SLOT(2)
+    VAL_SAMPLE_VIS_SLOT(3)
+    #undef VAL_SAMPLE_VIS_SLOT
+
     float3 N = normalize(worldNormal);
     float3 V = normalize(worldView);
 
@@ -313,6 +375,9 @@ void VAL_EvaluateAreaLight(
         N, V, worldPos, roughness, F0,
         P0, P1, P2, P3,
         lightColor, twoSided, useCookie) * facingMask;
+
+    diffuseOut  *= zoneMask;
+    specularOut *= zoneMask;
 }
 
 #endif // VAL_RECT_AREA_LIGHT_INCLUDED
