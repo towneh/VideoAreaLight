@@ -243,7 +243,16 @@ float3 VAL_SpecularContribution(
     float halfDiag = 0.5 * sqrt(lex * lex + ley * ley);
     float angularSpread = halfDiag / max(2.0 * dist, 1e-5);
     float alpha    = max(roughness * roughness, 1e-4);
-    float alphaP   = saturate(alpha + angularSpread);
+    // alphaP is the lobe width widened by the rectangle's angular extent
+    // (Karis). Don't saturate it — Karis's formulation is valid (and
+    // intended) for alphaP > 1, where the source's solid angle dominates
+    // surface roughness. Capping at 1 introduced a derivative
+    // discontinuity at alpha + angularSpread = 1; that kink, when
+    // multiplied with the other BRDF factors that vary with reflection
+    // geometry, manifested as a visible darker band on the floor along
+    // the locus where the equality held. D and normFactor naturally fade
+    // as alphaP grows, so no upper cap is needed.
+    float alphaP   = alpha + angularSpread;
 
     // GGX D
     float a2 = alphaP * alphaP;
