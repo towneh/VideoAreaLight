@@ -110,7 +110,7 @@ VideoAreaLight/
 
 ## Poiyomi Pro integration
 
-If your scene uses Poiyomi Pro, VideoAreaLight ships a Modular Shader module so existing Poiyomi-shaded materials can receive the area light without switching shader. Two-step setup:
+VideoAreaLight ships a Modular Shader module for Poiyomi Pro so existing Poiyomi-shaded materials can receive the area light without switching shader. Two-step setup:
 
 1. **Tools → VideoAreaLight → Install Poiyomi Module** (one-time, fast).
 2. Right-click each Poiyomi material → **VideoAreaLight - Apply to Material's Shader** (regenerates only those shaders).
