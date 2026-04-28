@@ -42,18 +42,19 @@ public class VideoAreaLightSource : MonoBehaviour
     [Tooltip("Softens the edge of the Zone Mask. 0 is a hard cut at the wall; around 0.1 gives a subtle fade.")]
     [Range(0f, 2f)] public float zoneFeather = 0.1f;
 
-    static readonly int _PositionsId      = Shader.PropertyToID("_VAL_Positions");
-    static readonly int _ColorId          = Shader.PropertyToID("_VAL_Color");
-    static readonly int _IntensityId      = Shader.PropertyToID("_VAL_Intensity");
-    static readonly int _NormalId         = Shader.PropertyToID("_VAL_Normal");
-    static readonly int _CookieTexId      = Shader.PropertyToID("_VAL_CookieTex");
-    static readonly int _TwoSidedId       = Shader.PropertyToID("_VAL_TwoSided");
-    static readonly int _ValidId          = Shader.PropertyToID("_VAL_Valid");
-    static readonly int _CookieMatrixId   = Shader.PropertyToID("_VAL_CookieWorldToUV");
-    static readonly int _ZoneEnabledId    = Shader.PropertyToID("_VAL_ZoneEnabled");
-    static readonly int _WorldToZoneId    = Shader.PropertyToID("_VAL_WorldToZone");
-    static readonly int _ZoneHalfExtentsId = Shader.PropertyToID("_VAL_ZoneHalfExtents");
-    static readonly int _ZoneFeatherId    = Shader.PropertyToID("_VAL_ZoneFeather");
+    static int _PositionsId;
+    static int _ColorId;
+    static int _IntensityId;
+    static int _NormalId;
+    static int _CookieTexId;
+    static int _TwoSidedId;
+    static int _ValidId;
+    static int _CookieMatrixId;
+    static int _ZoneEnabledId;
+    static int _WorldToZoneId;
+    static int _ZoneHalfExtentsId;
+    static int _ZoneFeatherId;
+    static bool _idsCached;
 
     readonly Vector4[] _corners = new Vector4[4];
 
@@ -61,18 +62,41 @@ public class VideoAreaLightSource : MonoBehaviour
     Color _currentAvg = Color.black;
     Color _targetAvg  = Color.black;
     float _lastSampleTime;
-    bool  _readbackInFlight;
+    AsyncGPUReadbackRequest? _pendingReq;
 
-    void OnEnable() => EnsureRT();
+    void OnEnable()
+    {
+        EnsureIds();
+        EnsureRT();
+    }
     void OnDisable()
     {
         Cleanup();
+        _pendingReq = null;
         Shader.SetGlobalFloat(_ValidId, 0f);
     }
 
     void Cleanup()
     {
         if (_avgRT != null) { _avgRT.Release(); DestroyImmediate(_avgRT); _avgRT = null; }
+    }
+
+    void EnsureIds()
+    {
+        if (_idsCached) return;
+        _PositionsId       = Shader.PropertyToID("_VAL_Positions");
+        _ColorId           = Shader.PropertyToID("_VAL_Color");
+        _IntensityId       = Shader.PropertyToID("_VAL_Intensity");
+        _NormalId          = Shader.PropertyToID("_VAL_Normal");
+        _CookieTexId       = Shader.PropertyToID("_VAL_CookieTex");
+        _TwoSidedId        = Shader.PropertyToID("_VAL_TwoSided");
+        _ValidId           = Shader.PropertyToID("_VAL_Valid");
+        _CookieMatrixId    = Shader.PropertyToID("_VAL_CookieWorldToUV");
+        _ZoneEnabledId     = Shader.PropertyToID("_VAL_ZoneEnabled");
+        _WorldToZoneId     = Shader.PropertyToID("_VAL_WorldToZone");
+        _ZoneHalfExtentsId = Shader.PropertyToID("_VAL_ZoneHalfExtents");
+        _ZoneFeatherId     = Shader.PropertyToID("_VAL_ZoneFeather");
+        _idsCached = true;
     }
 
     void EnsureRT()
@@ -89,17 +113,39 @@ public class VideoAreaLightSource : MonoBehaviour
 
     void LateUpdate()
     {
+        EnsureIds();
         EnsureRT();
+
+        if (_pendingReq.HasValue && _pendingReq.Value.done)
+        {
+            var req = _pendingReq.Value;
+            _pendingReq = null;
+            if (!req.hasError)
+            {
+                var data = req.GetData<Color32>();
+                if (data.Length >= 16)
+                {
+                    int sumR = 0, sumG = 0, sumB = 0;
+                    for (int i = 0; i < 16; i++)
+                    {
+                        sumR += data[i].r;
+                        sumG += data[i].g;
+                        sumB += data[i].b;
+                    }
+                    float div = 16f * 255f;
+                    _targetAvg = new Color(sumR / div, sumG / div, sumB / div, 1f);
+                }
+            }
+        }
 
         if (videoTexture != null)
         {
             float interval = 1f / Mathf.Max(sampleRate, 0.01f);
-            if (!_readbackInFlight && Time.realtimeSinceStartup - _lastSampleTime >= interval)
+            if (!_pendingReq.HasValue && Time.realtimeSinceStartup - _lastSampleTime >= interval)
             {
                 _lastSampleTime = Time.realtimeSinceStartup;
                 Graphics.Blit(videoTexture, _avgRT);
-                _readbackInFlight = true;
-                AsyncGPUReadback.Request(_avgRT, 0, OnAvgReadback);
+                _pendingReq = AsyncGPUReadback.Request(_avgRT, 0);
             }
         }
 
@@ -225,24 +271,6 @@ public class VideoAreaLightSource : MonoBehaviour
         Shader.SetGlobalMatrix(_WorldToZoneId, worldToZone);
         Shader.SetGlobalVector(_ZoneHalfExtentsId, halfExtents);
         Shader.SetGlobalFloat(_ZoneFeatherId, zoneFeather);
-    }
-
-    void OnAvgReadback(AsyncGPUReadbackRequest req)
-    {
-        _readbackInFlight = false;
-        if (req.hasError) return;
-        var data = req.GetData<Color32>();
-        if (data.Length < 16) return;
-
-        int sumR = 0, sumG = 0, sumB = 0;
-        for (int i = 0; i < 16; i++)
-        {
-            sumR += data[i].r;
-            sumG += data[i].g;
-            sumB += data[i].b;
-        }
-        float div = 16f * 255f;
-        _targetAvg = new Color(sumR / div, sumG / div, sumB / div, 1f);
     }
 
     void OnDrawGizmosSelected()
