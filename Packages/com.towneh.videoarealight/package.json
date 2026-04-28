@@ -1,6 +1,6 @@
 {
   "name": "com.towneh.videoarealight",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "displayName": "Video Area Light",
   "description": "Real-time area-light reflections from a video render texture for Unity URP 17 / Forward+. A bright video screen lights and reflects on glossy surfaces (floors, metal, panels) using an MRP specular approximation plus an analytic polygon irradiance integral. No precomputed lookup tables, no third-party data - MIT licensed.",
   "unity": "6000.0",
@@ -26,7 +26,7 @@
   "samples": [
     {
       "displayName": "Demo",
-      "description": "A small club-style venue with a 90-degree corridor and adjacent spawn alcove. Demonstrates the full feature set on a glossy floor: area-light reflections, the zone mask cutting contribution at the venue boundary, and cascading probe volumes (one coarse + one fine around the DJ booth) catching what the OBB can't. After import, run Tools > VideoAreaLight > Build Demo Scene — the builder generates the scene, materials, render texture, a placeholder image, and auto-bakes both probe volumes.",
+      "description": "A small club-style venue showing the full feature set on a glossy floor: area-light reflections, zone-mask boundary, cascading probe volumes (Scalar + Quadrant), and static prop shadows. After import, run Tools > VideoAreaLight > Build Demo Scene to generate the scene and auto-bake its probe volumes.",
       "path": "Samples~/Demo"
     },
     {
