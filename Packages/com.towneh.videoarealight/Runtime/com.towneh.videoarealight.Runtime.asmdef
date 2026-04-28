@@ -1,7 +1,9 @@
 {
     "name": "com.towneh.videoarealight.Runtime",
     "rootNamespace": "",
-    "references": [],
+    "references": [
+        "GUID:a2b22397d5e3094f49884a53aa9a6ab4"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
@@ -9,6 +11,12 @@
     "precompiledReferences": [],
     "autoReferenced": true,
     "defineConstraints": [],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.cnlohr.cilbox",
+            "expression": "0.0.0",
+            "define": "VAL_HAS_CILBOX"
+        }
+    ],
     "noEngineReferences": false
 }

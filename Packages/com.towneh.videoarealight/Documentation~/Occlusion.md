@@ -68,6 +68,19 @@ Each bake produces a `Texture3D` asset saved next to the active scene as `VAL_Vi
 
 `Occluder Mask` controls which physics layers count as light-blockers during baking. Walls, floors, and props you want to cast shadows should be included; the screen mesh's own collider (if any) should be excluded.
 
+### Encoding (Scalar or Quadrant)
+
+Each volume picks one of two encodings via the `Encoding` field on the inspector.
+
+`Scalar` (default) stores one visibility value per voxel — 1 byte each, the original format.
+
+`Quadrant` stores visibility separately for each of the screen's four UV quadrants — 4 bytes per voxel, 4× the texture size. At runtime the shader picks the right quadrant per fragment: orthogonal projection of `worldPos` onto the screen for diffuse, the MRP UV for specular. Two things this unlocks:
+
+- **Directional shadows on screen-facing walls.** With Scalar, a partial occluder between the screen and a wall produces a uniformly dimmed wall (the average of blocked and unblocked rays). Quadrant reconstructs the shadow direction from which screen quadrants the wall actually sees.
+- **Per-UV occlusion in floor reflections.** Quadrant darkens only the parts of the reflected screen that are physically blocked, instead of dimming the whole reflection uniformly.
+
+Don't enable everywhere. The recommended pattern is **Scalar for venue-wide coarse volumes** and **Quadrant only for fine volumes around problem geometry** (steps, mezzanines, screen-facing walls) where the directional accuracy is worth 4× the storage. The Demo sample mixes both: Scalar for `VAL_Probe_Coarse` and `VAL_Probe_Corridor`; Quadrant for `VAL_Probe_Fine` and `VAL_Probe_BoothFloor`.
+
 ## Recipe: a fine-detail Probe Volume around a step
 
 For a dance-floor step or any small piece of awkward geometry inside a venue:

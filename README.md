@@ -27,7 +27,7 @@ Install via the Unity Package Manager:
    https://github.com/towneh/VideoAreaLight.git?path=Packages/com.towneh.videoarealight
    ```
 
-To try the demo scene, find **Video Area Light** in the Package Manager, expand **Samples**, and click **Import** next to *Demo*. Then run **Tools > VideoAreaLight > Build Demo Scene** — this generates the scene, materials, render texture, placeholder image, and auto-bakes both probe volumes. Open the generated `Demo.unity` and hit Play.
+To try the demo scene, find **Video Area Light** in the Package Manager, expand **Samples**, and click **Import** next to *Demo*. Then run **Tools > VideoAreaLight > Build Demo Scene** — this generates the scene, materials, render texture, placeholder image, and auto-bakes its probe volumes. Open the generated `Demo.unity` and hit Play.
 
 ## Quick start
 
@@ -68,7 +68,7 @@ Captures occlusion from awkward indoor geometry — dance-floor steps, mezzanine
 - Click **Bake This Volume** in the volume's inspector. Re-bake when the screen, the volume, or any geometry moves. **Tools → VideoAreaLight → Bake Visibility** bakes every volume in the scene at once.
 - Each volume saves a Texture3D asset next to the active scene.
 
-For deeper guidance — sizing recipes, voxel-size tradeoffs, memory tables — see [`Documentation~/Occlusion.md`](Packages/com.towneh.videoarealight/Documentation~/Occlusion.md).
+For deeper guidance — sizing recipes, voxel-size and encoding tradeoffs, memory tables — see [`Documentation~/Occlusion.md`](Packages/com.towneh.videoarealight/Documentation~/Occlusion.md).
 
 ## Package contents
 
@@ -128,6 +128,10 @@ If you'd rather not use the drop-in shader, drop `Runtime/Shaders/VideoAreaLight
 - **Name:** `VideoAreaLight_float`
 
 Inputs: `WorldPos`, `WorldNormal`, `WorldView` (all World space), `Roughness` (1 − Smoothness), `BaseColor`, `Metallic`, `UseCookie` (0/1). Add the `Diffuse` + `Specular` outputs to your master node's **Emission** input.
+
+## Basis VR (Cilbox)
+
+`VideoAreaLightSource` is auto-marked `[Cilboxable]` when `com.cnlohr.cilbox` is present in the project, so the broadcaster runs inside Basis's prop sandbox without further setup. To opt out — Cilbox installed, but you don't want VAL surfaced to the prop script system — add `VAL_DISABLE_CILBOX` under **Project Settings → Player → Scripting Define Symbols**.
 
 ## Tuning
 
@@ -220,6 +224,14 @@ Most visible at Smoothness > 0.9. Lower Smoothness slightly or raise Response Ti
 <summary><strong>Performance dips on Quest</strong></summary>
 
 Use the `VideoAreaLight/Lit` shader only on the dance floor and a few key glossy surfaces; keep Use Cookie off on the rest.
+</details>
+
+<details>
+<summary><strong>Floor reflection shows coloured bands past the screen's edges</strong></summary>
+
+Caused by the cookie texture's Wrap Mode being set to Repeat. With Repeat, bilinear sampling near UVs 0/1 reads from the opposite edge and bleeds those colours past the reflection's actual footprint.
+
+Set the Wrap Mode to `Clamp` on the render texture (or any source texture) you're feeding to the broadcaster's `Video Texture`. The Demo builder force-sets this on its placeholder; user-supplied textures need it set manually in the Inspector.
 </details>
 
 ## License

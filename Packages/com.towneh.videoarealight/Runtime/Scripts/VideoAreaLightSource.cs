@@ -3,6 +3,9 @@ using UnityEngine.Rendering;
 
 [ExecuteAlways]
 [DisallowMultipleComponent]
+#if VAL_HAS_CILBOX && !VAL_DISABLE_CILBOX
+[Cilboxable]
+#endif
 public class VideoAreaLightSource : MonoBehaviour
 {
     [Header("Source")]
