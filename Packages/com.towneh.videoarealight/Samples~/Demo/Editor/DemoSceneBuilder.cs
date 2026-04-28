@@ -10,7 +10,6 @@ using UnityEngine.Video;
 
 namespace VideoAreaLight.Samples.Demo
 {
-    // One-shot builder for the VideoAreaLight demo scene.
     public static class DemoSceneBuilder
     {
         const string SceneName = "Demo";
@@ -39,19 +38,12 @@ namespace VideoAreaLight.Samples.Demo
             EnsureFolder(materialsPath);
             EnsureFolder(texturesPath);
 
-            // Floor: smooth fBm, fine features, low strength — preserves the
-            // gloss reflection of the screen as a believable hazy mirror.
             var floorNormal = CreateNoiseNormalMap(texturesPath, "VAL_Floor_Normal",
                 frequency: 18f, strength: 1.2f, turbulenceMix: 0f, seed: 1337);
-            // Walls: turbulence/smooth mix + smaller features + higher strength
-            // — reads as painted render/plaster. No specular reflection here
-            // so we can be bolder; pure turbulence's abs() ridges read as
-            // crumpled paper at this scale, so we mix it 60/40 with smooth
-            // fBm to soften the crease network into organic surface texture.
             var wallNormal = CreateNoiseNormalMap(texturesPath, "VAL_Wall_Normal",
                 frequency: 14f, strength: 1.5f, turbulenceMix: 0.6f, seed: 7331);
             var mats = CreateMaterials(materialsPath, floorNormal, wallNormal);
-            if (mats.walls == null) return; // shader lookup failed; error logged inside
+            if (mats.walls == null) return;
 
             var screenRT = CreateScreenRT(texturesPath);
             var placeholder = CreatePlaceholderTexture(texturesPath);
@@ -74,50 +66,25 @@ namespace VideoAreaLight.Samples.Demo
             BuildPostFXVolume(lighting, volumeProfile);
             var src = BuildVALSource(lighting, mats, screenRT, placeholder);
             BuildZoneMask(lighting, src);
-            // Encoding choice per probe is the demo's headline showcase of
-            // the mix-and-match pattern: venue-wide volumes stay Scalar
-            // (cheap, the package's drop-in promise) while localized fine
-            // volumes around problem geometry use Quadrant (4× memory but
-            // correct directional shadows on walls and per-screen-UV
-            // accuracy in the floor's specular reflection).
+            // Demo intentionally mixes encodings: Scalar for venue-wide,
+            // Quadrant for problem geometry where directional accuracy matters.
             BuildProbeVolume(lighting, "VAL_Probe_Coarse",
                 center: new Vector3(1.5f, 1.75f, -2.5f),
                 size:   new Vector3(13.5f, 3.7f, 10.5f),
                 voxelSize: 0.1f, priority: 0,
                 encoding: VALVisibilityEncoding.Scalar);
-            // Fine probe Y range extends slightly below the floor so that
-            // floor fragments (at Y=0) read between two voxel layers via
-            // trilinear instead of clamping to a single layer — adds soft
-            // bilinear smoothing on the Y axis at the floor surface.
-            // Quadrant encoding here gives the speaker shadows correct
-            // height-tracking on the south wall behind the booth.
+            // Y range extends below floor so floor fragments read between two
+            // voxel layers via trilinear instead of clamping to one.
             BuildProbeVolume(lighting, "VAL_Probe_Fine",
                 center: new Vector3(0f, 1.45f, -1.5f),
                 size:   new Vector3(4.0f, 3.1f, 4.0f),
                 voxelSize: 0.025f, priority: 10,
                 encoding: VALVisibilityEncoding.Quadrant);
-            // Third probe targeting the corridor's near-doorway visible
-            // region — the corridor's back wall (L_WallS) and the floor/walls
-            // of corridor A. The coarse probe covers this at 10cm but
-            // produces muddy shadow edges; this 5cm probe tightens them.
-            // Stays Scalar — directional accuracy matters less here, and
-            // the coarse + corridor pair is the venue's load-bearing
-            // occlusion infrastructure.
             BuildProbeVolume(lighting, "VAL_Probe_Corridor",
                 center: new Vector3(0f, 1.5f, -4.5f),
                 size:   new Vector3(3.0f, 3.0f, 5.0f),
                 voxelSize: 0.05f, priority: 5,
                 encoding: VALVisibilityEncoding.Scalar);
-            // Fourth probe specifically for the booth-floor interface.
-            // The fine probe at 2.5cm produces visible voxel-grid stepping
-            // on the floor's shadow boundary at close viewing distance;
-            // this 1cm probe sharpens that boundary in the small region
-            // that actually needs it. Y range slightly below the floor for
-            // bilinear smoothing. Priority 15 claims the highest slot —
-            // these shadows are the most visually prominent and most
-            // expensive to lose if the slot count maxes out. Quadrant
-            // encoding here gives the floor's specular reflection accurate
-            // per-screen-UV occlusion for camera-near floor positions.
             BuildProbeVolume(lighting, "VAL_Probe_BoothFloor",
                 center: new Vector3(0f, 0.1f, -1.0f),
                 size:   new Vector3(3.2f, 0.4f, 1.5f),
@@ -127,26 +94,18 @@ namespace VideoAreaLight.Samples.Demo
 
             BuildCamera();
 
-            // Save first so the baker knows where to put VAL_Visibility_*.asset
-            // files (it derives the asset directory from the active scene's path).
+            // Save before bake — baker derives VAL_Visibility_*.asset directory
+            // from the active scene's path.
             string scenePath = sampleRoot + "/" + SceneName + ".unity";
             EditorSceneManager.SaveScene(scene, scenePath);
 
-            // Force the physics scene to ingest the transforms we just set.
-            // In edit mode, GameObject.CreatePrimitive creates colliders but
-            // Unity doesn't auto-sync transform positions to the physics
-            // scene until Play starts (or this call). Without it, the
-            // RaycastCommand-based bake fires against stale collider
-            // positions and produces wrong visibility — shadow in the wrong
-            // place that only fixes itself on a later manual re-bake.
+            // Edit-mode CreatePrimitive doesn't auto-sync transforms into the
+            // physics scene; without this the bake hits stale collider positions.
             Physics.SyncTransforms();
 
-            // Auto-bake both probe volumes so the scene is ready to play
-            // immediately. Without this the user has to remember to run
-            // Tools > VideoAreaLight > Bake Visibility separately.
             VideoAreaLightProbeVolumeBaker.BakeMenu();
 
-            // Save again to persist each volume's bakedVisibility reference.
+            // Persist each volume's bakedVisibility reference.
             EditorSceneManager.SaveScene(scene, scenePath);
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
@@ -158,14 +117,8 @@ namespace VideoAreaLight.Samples.Demo
             EditorUtility.FocusProjectWindow();
         }
 
-        // --------------------------------------------------------------
-        // Folder / asset helpers
-        // --------------------------------------------------------------
-
         static string LocateSampleRoot()
         {
-            // The script's own asset path tells us where the sample lives.
-            // After import via Package Manager, that's Assets/Samples/<pkg>/<ver>/<sample>.
             var guids = AssetDatabase.FindAssets(nameof(DemoSceneBuilder) + " t:MonoScript");
             if (guids == null || guids.Length == 0) return null;
             string scriptPath = AssetDatabase.GUIDToAssetPath(guids[0]);
@@ -183,10 +136,6 @@ namespace VideoAreaLight.Samples.Demo
             AssetDatabase.CreateFolder(parent, name);
         }
 
-        // --------------------------------------------------------------
-        // Materials
-        // --------------------------------------------------------------
-
         struct Mats
         {
             public Material walls;
@@ -199,9 +148,9 @@ namespace VideoAreaLight.Samples.Demo
 
         static Mats CreateMaterials(string folder, Texture2D floorNormal, Texture2D wallNormal)
         {
-            // Surfaces that receive the area light MUST use VideoAreaLight/Lit
-            // (or Shader Graph / Poiyomi with the VAL hook). URP/Lit alone
-            // doesn't read the _VAL_* globals — surfaces would render dark.
+            // Surfaces receiving the area light MUST use VideoAreaLight/Lit
+            // (or SG / Poiyomi with the VAL hook); URP/Lit alone doesn't read
+            // the _VAL_* globals.
             var lit = Shader.Find("VideoAreaLight/Lit");
             var unlit = Shader.Find("Universal Render Pipeline/Unlit");
             if (lit == null)
@@ -227,20 +176,12 @@ namespace VideoAreaLight.Samples.Demo
                 screen     = MakeUnlit(folder, "VAL_Screen",    unlit, Color.white),
             };
 
-            // Floor normal: 1m tiling across the 8x5m main-room floor.
-            // _BumpScale stays subtle so the screen's gloss reflection
-            // stays legible — aggressive normals shatter the mirror into
-            // incoherent noise.
             mats.floor.SetTexture("_BumpMap", floorNormal);
             mats.floor.SetFloat("_BumpScale", 0.15f);
             mats.floor.SetTextureScale("_BumpMap", new Vector2(8f, 5f));
             mats.floor.EnableKeyword("_NORMALMAP");
             EditorUtility.SetDirty(mats.floor);
 
-            // Wall normal: 4m tiling. Walls are viewed from metres back, not
-            // arm's length like floors, so dense tiling makes the repetition
-            // pattern visible without earning extra detail. Larger tiles
-            // hide the seam without losing apparent surface character.
             mats.walls.SetTexture("_BumpMap", wallNormal);
             mats.walls.SetFloat("_BumpScale", 0.2f);
             mats.walls.SetTextureScale("_BumpMap", new Vector2(2f, 0.875f));
@@ -276,34 +217,11 @@ namespace VideoAreaLight.Samples.Demo
             return m;
         }
 
-        // --------------------------------------------------------------
-        // Screen render texture + placeholder image
-        // --------------------------------------------------------------
-
-        // Always generate a fresh render texture inside the sample's
-        // Textures/ folder. The sample owns all of its assets; no lookups
-        // for pre-existing render textures elsewhere in the project.
-        //
-        // Parameters chosen for typical video content + clean reflections:
-        //   1920×1080 (matches HD video clips),
-        //   16-bit-per-channel UNorm linear (R16G16B16A16_UNorm) — the
-        //   cookie sample is multiplied through the broadcaster's
-        //   intensity (60+ in the demo), and at 8 bits per channel that
-        //   pushes smooth gradients into visible banding territory.
-        //   Doubles RT memory vs 8-bit but is still ~16 MB at 1080p,
-        //   trivial in context. Unity's video-player docs recommend 8-bit
-        //   for direct video display — that's the right call when the
-        //   texture is just blitted to screen, but we sample it through
-        //   HDR lighting math so the extra precision earns its keep.
-        //   Mipmaps on + trilinear (smooth reflections at distance/
-        //   grazing), Clamp wrap (prevents bilinear edge wrap-around).
+        // R16G16B16A16_UNorm: cookie sample is multiplied through HDR intensity;
+        // 8-bit pushes smooth gradients into visible banding.
         static RenderTexture CreateScreenRT(string folder)
         {
             string path = $"{folder}/VAL_Screen_RT.renderTexture";
-            // Always recreate. An existing asset from a prior build may have
-            // a stale format (e.g. the 8-bit RGBA we shipped before bumping
-            // to 16-bit), and the VideoPlayer's targetTexture is rewired
-            // each build anyway, so there's no reference to preserve.
             if (AssetDatabase.LoadAssetAtPath<RenderTexture>(path) != null)
                 AssetDatabase.DeleteAsset(path);
 
@@ -320,9 +238,6 @@ namespace VideoAreaLight.Samples.Demo
             return rt;
         }
 
-        // SMPTE-style 7-bar test pattern. Recognisable as a placeholder,
-        // averages to a near-neutral grey so the room reads as lit but not
-        // tinted before a real video clip is wired up.
         static Texture2D CreatePlaceholderTexture(string folder)
         {
             string path = $"{folder}/VAL_ScreenPlaceholder.png";
@@ -370,13 +285,9 @@ namespace VideoAreaLight.Samples.Demo
             return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
         }
 
-        // Force the texture's wrap mode to Clamp. Unity's default texture
-        // import wrap mode is Repeat, which causes bilinear sampling at
-        // UVs near 0/1 to pull in colours from the opposite edge of the
-        // texture. For a cookie texture sampled by the area light, that
-        // bleeds visible bands of unrelated colour past the reflection's
-        // actual footprint on receiving surfaces. Same caution applies to
-        // any user-supplied video texture or render texture.
+        // Cookie textures must use Clamp wrap. Default Repeat causes bilinear
+        // sampling near UV 0/1 to bleed colour from the opposite edge into
+        // reflections.
         static void EnforceCookieTextureSettings(string path)
         {
             var importer = AssetImporter.GetAtPath(path) as TextureImporter;
@@ -386,14 +297,9 @@ namespace VideoAreaLight.Samples.Demo
             importer.SaveAndReimport();
         }
 
-        // Procedural stochastic normal map: low-frequency domain warp +
-        // multi-octave noise height, central-difference Sobel for
-        // tangent-space normals. Re-imports as TextureType=NormalMap so
-        // Unity uses the correct decode path. Modulo wraparound on the
-        // central-difference step keeps the tile seam invisible at the
-        // Repeat boundary. turbulenceMix blends abs(2x-1) (sharp creases,
-        // matte-surface character) with smooth fBm (rounded undulation,
-        // gloss-friendly): 0 = pure smooth, 1 = pure turbulence.
+        // Procedural normal map: domain-warped multi-octave noise + central-
+        // difference Sobel. turbulenceMix blends abs(2x-1) ridges with smooth
+        // fBm: 0 = smooth, 1 = pure turbulence.
         static Texture2D CreateNoiseNormalMap(string folder, string fileName,
             float frequency, float strength, float turbulenceMix, int seed)
         {
@@ -468,10 +374,8 @@ namespace VideoAreaLight.Samples.Demo
             File.WriteAllBytes(absPath, png);
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
 
-            // TextureType=NormalMap tells Unity to compress to BC5 (or
-            // DXT5nm on older targets) and to expect UnpackNormal in the
-            // shader. sRGB must be off — normals encode signed direction
-            // data, not perceptual colour.
+            // NormalMap import type: BC5/DXT5nm + UnpackNormal in the shader.
+            // sRGB off — direction data, not perceptual colour.
             var importer = AssetImporter.GetAtPath(path) as TextureImporter;
             if (importer != null)
             {
@@ -483,17 +387,6 @@ namespace VideoAreaLight.Samples.Demo
 
             return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
         }
-
-        // --------------------------------------------------------------
-        // Post-processing volume profile
-        //
-        // ACES tonemap + a touch of bloom: the screen is HDR-bright and
-        // we want it to read as "lit from within" without washing out
-        // the surrounding venue. Threshold 1.0 keeps the bloom confined
-        // to the emissive screen surface; the dim ambient and matte
-        // walls don't contribute. Intensity 0.1 stays subtle — bloom
-        // is a finishing touch here, not the headline effect.
-        // --------------------------------------------------------------
 
         static VolumeProfile CreateVolumeProfile(string folder)
         {
@@ -509,6 +402,8 @@ namespace VideoAreaLight.Samples.Demo
             AssetDatabase.AddObjectToAsset(tonemap, profile);
             tonemap.mode.Override(TonemappingMode.ACES);
 
+            // Threshold 1.0 confines bloom to the emissive screen surface;
+            // dim ambient walls don't contribute.
             var bloom = profile.Add<Bloom>(false);
             bloom.hideFlags = HideFlags.HideInHierarchy | HideFlags.HideInInspector;
             AssetDatabase.AddObjectToAsset(bloom, profile);
@@ -530,10 +425,6 @@ namespace VideoAreaLight.Samples.Demo
             v.sharedProfile = profile;
         }
 
-        // --------------------------------------------------------------
-        // Render settings (dark club ambient — the screen IS the light)
-        // --------------------------------------------------------------
-
         static void ConfigureRenderSettings()
         {
             // Dark club ambient — the screen IS the light.
@@ -545,22 +436,15 @@ namespace VideoAreaLight.Samples.Demo
             RenderSettings.skybox = null;
             RenderSettings.fog = false;
 
-            // Kill environment reflections. With a null skybox but the default
-            // reflection mode still set to Skybox, Unity falls back to a
-            // built-in cubemap for ambient reflections — produces a faint
-            // sky-blue smear on the gloss floor that competes with the
-            // screen's reflection. Zero it so the only specular reflection
-            // a user sees is the area light.
+            // Kill env reflections. With a null skybox but the default
+            // reflection mode still Skybox, Unity falls back to a built-in
+            // cubemap that smears sky-blue on the gloss floor.
             RenderSettings.defaultReflectionMode = DefaultReflectionMode.Custom;
             RenderSettings.customReflectionTexture = null;
             RenderSettings.reflectionIntensity = 0f;
         }
 
-        // --------------------------------------------------------------
         // Architecture — interior dimensions in metres, walls 0.2m thick.
-        // Walls extend outward from each room's interior face; where two
-        // rooms share a boundary plane, a single wall straddles it.
-        // --------------------------------------------------------------
 
         static GameObject MakeBox(Transform parent, string name, Vector3 center, Vector3 size, Material mat)
         {
@@ -570,13 +454,10 @@ namespace VideoAreaLight.Samples.Demo
             go.transform.position = center;
             go.transform.localScale = size;
             go.GetComponent<MeshRenderer>().sharedMaterial = mat;
-            // BoxCollider comes by default on a Cube primitive — required for the
-            // probe volume's Physics.Raycast bake.
             return go;
         }
 
-        // Main room interior: X=[-4,+4], Z=[-2.5,+2.5], Y=[0,3.5].
-        // S wall has a doorway at X=[-1,+1], Y=[0,2.2].
+        // Main room: X=[-4,+4], Z=[-2.5,+2.5], Y=[0,3.5]. S wall doorway X=[-1,+1], Y=[0,2.2].
         static void BuildMainRoom(Transform arch, Mats m)
         {
             var root = new GameObject("MainRoom").transform;
@@ -592,65 +473,46 @@ namespace VideoAreaLight.Samples.Demo
             MakeBox(root, "WallS_Header",  new Vector3(0,     2.85f, -2.6f),new Vector3(2.0f, 1.3f, 0.2f),  m.walls);
         }
 
-        // L-shaped corridor:
-        //   A (south leg):  X=[-1,+1], Z=[-6.5,-2.5], Y=[0,3]
-        //   B (east leg):   X=[+1,+5], Z=[-6.5,-4.5], Y=[0,3]
-        // Corner cell shared between them at X=[-1,+1], Z=[-6.5,-4.5].
+        // L-shaped corridor: A leg X=[-1,+1] Z=[-6.5,-2.5], B leg X=[+1,+5] Z=[-6.5,-4.5].
         static void BuildCorridor(Transform arch, Mats m)
         {
             var root = new GameObject("Corridor").transform;
             root.SetParent(arch, false);
 
-            // Corridor A. The ceiling and side walls are trimmed at Z=-2.7
-            // (the south face of the main room's S wall) rather than Z=-2.5
-            // (the interior face). Without the trim, the corridor structure
-            // pushes into the main-room wall body and z-fights along the
-            // doorway band — most visibly on the ceiling viewed through
-            // the doorway. The floor stays at Z=-2.5 because the two floors
-            // only touch at that plane (no volume overlap with any wall).
+            // Corridor A. Ceiling/side walls trimmed at Z=-2.7 (south face of
+            // the main-room S wall) so bodies abut cleanly without z-fight.
+            // Floor stays at Z=-2.5 — only touches at that plane.
             MakeBox(root, "A_Floor",   new Vector3(0,    -0.1f, -4.5f), new Vector3(2.0f, 0.2f, 4.0f), m.floor);
             MakeBox(root, "A_Ceiling", new Vector3(0,     3.1f, -4.6f), new Vector3(2.0f, 0.2f, 3.8f), m.ceiling);
             MakeBox(root, "A_WallW",   new Vector3(-1.1f, 1.5f, -4.6f), new Vector3(0.2f, 3.0f, 3.8f), m.walls);
-            // A's east wall covers only the segment north of the corner. Its
-            // south end is also trimmed (Z=-4.3) to abut B_WallN's interior
-            // face rather than its body, avoiding z-fight at the L corner.
+            // South end trimmed (Z=-4.3) to abut B_WallN's interior face.
             MakeBox(root, "A_WallE",   new Vector3(1.1f,  1.5f, -3.5f), new Vector3(0.2f, 3.0f, 1.6f), m.walls);
 
-            // Corridor B
             MakeBox(root, "B_Floor",   new Vector3(3.0f, -0.1f, -5.5f), new Vector3(4.0f, 0.2f, 2.0f), m.floor);
             MakeBox(root, "B_Ceiling", new Vector3(3.0f,  3.1f, -5.5f), new Vector3(4.0f, 0.2f, 2.0f), m.ceiling);
             MakeBox(root, "B_WallN",   new Vector3(3.0f,  1.5f, -4.4f), new Vector3(4.0f, 3.0f, 0.2f), m.walls);
 
-            // Shared south wall of the L: spans X=[-1,+5] at Z=-6.6.
             MakeBox(root, "L_WallS",   new Vector3(2.0f,  1.5f, -6.6f), new Vector3(6.0f, 3.0f, 0.2f), m.walls);
         }
 
-        // Spawn alcove: X=[+5,+8], Z=[-7,-4], Y=[0,3].
-        // West wall opens onto corridor B at Z=[-6.5,-4.5], Y=[0,2.2].
+        // Spawn alcove: X=[+5,+8], Z=[-7,-4], Y=[0,3]. W wall opens onto corridor B at Z=[-6.5,-4.5], Y=[0,2.2].
         static void BuildSpawn(Transform arch, Mats m)
         {
             var root = new GameObject("Spawn").transform;
             root.SetParent(arch, false);
 
-            MakeBox(root, "Floor",       new Vector3(6.5f, -0.1f, -5.5f), new Vector3(3.0f, 0.2f, 3.0f), m.walls); // matte, intentionally not gloss — different room aesthetic
+            MakeBox(root, "Floor",       new Vector3(6.5f, -0.1f, -5.5f), new Vector3(3.0f, 0.2f, 3.0f), m.walls); // matte, intentionally not gloss
             MakeBox(root, "Ceiling",     new Vector3(6.5f,  3.1f, -5.5f), new Vector3(3.0f, 0.2f, 3.0f), m.ceiling);
             MakeBox(root, "WallE",       new Vector3(8.1f,  1.5f, -5.5f), new Vector3(0.2f, 3.0f, 3.0f), m.walls);
             MakeBox(root, "WallN",       new Vector3(6.5f,  1.5f, -3.9f), new Vector3(3.0f, 3.0f, 0.2f), m.walls);
             MakeBox(root, "WallS",       new Vector3(6.5f,  1.5f, -7.1f), new Vector3(3.0f, 3.0f, 0.2f), m.walls);
 
-            // West wall remnants around the opening to corridor B. The North
-            // and South remnants are trimmed at the boundaries with corridor
-            // B's north wall (Z=-4.3) and the L's south wall (Z=-6.7) so
-            // their bodies abut rather than overlap, eliminating z-fight.
+            // West wall remnants around the corridor-B opening, trimmed to
+            // abut neighbouring wall bodies without overlap.
             MakeBox(root, "WallW_Header",new Vector3(4.9f,  2.6f, -5.5f), new Vector3(0.2f, 0.8f, 2.0f), m.walls);
             MakeBox(root, "WallW_South", new Vector3(4.9f,  1.1f, -6.85f),new Vector3(0.2f, 2.2f, 0.3f), m.walls);
             MakeBox(root, "WallW_North", new Vector3(4.9f,  1.1f, -4.15f),new Vector3(0.2f, 2.2f, 0.3f), m.walls);
         }
-
-        // --------------------------------------------------------------
-        // DJ booth — three primitives; concave silhouette so the fine
-        // probe volume has something to cast a shadow with.
-        // --------------------------------------------------------------
 
         static void BuildDJBooth(Transform props, Mats m)
         {
@@ -662,98 +524,78 @@ namespace VideoAreaLight.Samples.Demo
             MakeBox(root, "SpeakerR", new Vector3( 1.2f, 0.75f, -1.0f), new Vector3(0.5f, 1.5f, 0.5f), m.boothMatte);
         }
 
-        // Disabled-by-default capsule with a plain URP/Lit material. URP/Lit
-        // does not read the _VAL_* globals, so the capsule does not receive
-        // VAL contribution.
         static void BuildPlayer(Transform props, string materialsPath)
         {
+            BuildPlayerCapsule(props, materialsPath, "Player_1", "VAL_Player_1", new Vector3( 0.5f, 0.75f, 0.5f));
+            BuildPlayerCapsule(props, materialsPath, "Player_2", "VAL_Player_2", new Vector3(-0.5f, 0.75f, 0.5f));
+        }
+
+        static void BuildPlayerCapsule(Transform props, string materialsPath, string name, string matName, Vector3 localPos)
+        {
             var go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            go.name = "Player";
+            go.name = name;
             go.transform.SetParent(props, false);
-            go.transform.localPosition = new Vector3(0f, 0.75f, 0f);
+            go.transform.localPosition = localPos;
             go.transform.localScale = new Vector3(0.75f, 0.75f, 0.75f);
 
             var col = go.GetComponent<Collider>();
             if (col != null) Object.DestroyImmediate(col);
 
-            var urpLit = Shader.Find("Universal Render Pipeline/Lit");
-            if (urpLit == null)
-            {
-                Debug.LogWarning("DemoSceneBuilder: 'Universal Render Pipeline/Lit' shader not found; " +
-                                 "Player capsule will use the primitive's default material.");
-            }
-            else
-            {
-                string matPath = $"{materialsPath}/VAL_Player.mat";
-                var existing = AssetDatabase.LoadAssetAtPath<Material>(matPath);
-                var mat = existing != null ? existing : new Material(urpLit) { name = "VAL_Player" };
-                mat.shader = urpLit;
-                if (existing == null) AssetDatabase.CreateAsset(mat, matPath);
-                else EditorUtility.SetDirty(mat);
-                go.GetComponent<MeshRenderer>().sharedMaterial = mat;
-            }
+            var lit = Shader.Find("VideoAreaLight/Lit");
+            string matPath = $"{materialsPath}/{matName}.mat";
+            var existing = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+            var mat = existing != null ? existing : new Material(lit) { name = matName };
+            mat.shader = lit;
+            mat.SetColor("_BaseColor", new Color(0.4f, 0.4f, 0.4f));
+            mat.SetFloat("_Smoothness", 0.5f);
+            if (existing == null) AssetDatabase.CreateAsset(mat, matPath);
+            else EditorUtility.SetDirty(mat);
+            go.GetComponent<MeshRenderer>().sharedMaterial = mat;
 
             go.SetActive(false);
         }
 
-        // --------------------------------------------------------------
-        // Lighting
-        // --------------------------------------------------------------
-
         static VideoAreaLightSource BuildVALSource(Transform parent, Mats m, RenderTexture screenRT, Texture2D placeholder)
         {
-            // CRITICAL: VideoAreaLightSource and the Quad MeshRenderer MUST
-            // live on the same GameObject. The broadcaster builds its
-            // world-space corners via transform.TransformPoint(localHalfSize)
-            // using ITS OWN transform — so its scale has to match the Quad
-            // mesh it's emitting from. Splitting them onto parent + child
-            // silently desyncs the lit area from the rendered screen
-            // (broadcaster reads parent scale 1×1 while the Quad renders at
-            // child scale; reflection footprint shrinks to 1m).
+            // CRITICAL: VideoAreaLightSource and the Quad MeshRenderer MUST live
+            // on the same GameObject. The broadcaster computes world-space
+            // corners via its own transform; splitting them desyncs the lit
+            // area from the rendered screen.
             var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
             quad.name = "VAL_Source";
             quad.transform.SetParent(parent, false);
-            // Slightly inside the N wall (interior face at Z=+2.5) so the
-            // screen quad doesn't z-fight with the wall surface.
+            // Slightly inside the N wall (interior face Z=+2.5) to avoid z-fight.
             quad.transform.position = new Vector3(0, 1.6f, 2.4f);
-            // Default Unity Quad's visible face is on -transform.forward, so
-            // identity rotation already faces -Z (into the room). The
-            // broadcaster's flipNormal=true mirrors its emit direction to
-            // match the visible face.
+            // Default Quad's visible face is on -transform.forward; flipNormal=true
+            // mirrors the broadcaster's emit direction to match.
             quad.transform.localRotation = Quaternion.identity;
-            quad.transform.localScale = new Vector3(4.8f, 2.7f, 1.5f); // 16:9, sized for the room
+            quad.transform.localScale = new Vector3(4.8f, 2.7f, 1.5f);
             quad.GetComponent<MeshRenderer>().sharedMaterial = m.screen;
-            // Strip the Quad's MeshCollider so probe-bake rays don't hit it.
+            // Strip MeshCollider so probe-bake rays don't hit the screen.
             var quadCollider = quad.GetComponent<Collider>();
             if (quadCollider != null) Object.DestroyImmediate(quadCollider);
 
             var val = quad.AddComponent<VideoAreaLightSource>();
-            val.localHalfSize = new Vector2(0.5f, 0.5f); // default Quad mesh extents
+            val.localHalfSize = new Vector2(0.5f, 0.5f);
             val.screenAxis = VideoAreaLightSource.Axis.XY;
             val.flipNormal = true;
-            val.maxIntensity = 60f;       // club-bright
+            val.maxIntensity = 20f;
             val.intensityCurve = 1.5f;
             val.saturationBoost = 1.4f;
             val.zoneFeather = 0.3f;
 
-            // Both fields point at the placeholder so the screen has visible
-            // signal at import even before any video is wired up. Average
-            // colour of the SMPTE bars produces neutral-ish lighting in the
-            // room. When the user adds a clip, they swap both fields to the
-            // render texture (documented in the sample README).
+            // Both fields point at the placeholder so the screen has signal at
+            // import. User swaps both to the render texture when adding a clip.
             val.videoTexture = placeholder;
             m.screen.SetTexture("_BaseMap", placeholder);
 
-            // Pre-configured VideoPlayer waiting on a clip. Drop a clip on
-            // VideoPlayer.clip and hit play — it'll write to screenRT
-            // automatically.
             var vp = quad.AddComponent<VideoPlayer>();
             vp.playOnAwake = true;
             vp.isLooping = true;
             vp.renderMode = VideoRenderMode.RenderTexture;
             vp.targetTexture = screenRT;
             vp.audioOutputMode = VideoAudioOutputMode.None;
-            vp.source = VideoSource.VideoClip; // clip stays null until user provides one
+            vp.source = VideoSource.VideoClip;
 
             return val;
         }
@@ -762,14 +604,8 @@ namespace VideoAreaLight.Samples.Demo
         {
             var go = new GameObject("VAL_ZoneMask");
             go.transform.SetParent(parent, false);
-            // Sized to cover the venue's bounding rectangle (main room +
-            // corridor + spawn, with a small overscan). This matches the
-            // package's design intent: zone mask = venue boundary, probe
-            // volumes handle intra-venue visibility. With this sizing, the
-            // corridor's far wall correctly lights up where it has line of
-            // sight through the doorway (the coarse probe + analytic light
-            // do the work) and stays dark deeper in where the bake records
-            // no visibility.
+            // Sized to the venue's bounding rectangle. Zone mask = venue
+            // boundary; probe volumes handle intra-venue visibility.
             go.transform.position = new Vector3(2f, 1.75f, -2.25f);
             var box = go.AddComponent<BoxCollider>();
             box.isTrigger = true;
@@ -785,12 +621,11 @@ namespace VideoAreaLight.Samples.Demo
             go.transform.SetParent(parent, false);
             go.transform.position = center;
             var v = go.AddComponent<VideoAreaLightProbeVolume>();
-            v.center = Vector3.zero; // we move via transform.position, not local center
+            v.center = Vector3.zero;
             v.size = size;
             v.voxelSize = voxelSize;
-            // Quadrant encoding's per-quadrant variance scales as 1/sqrt(N/4)
-            // — needs roughly 4× the sample count of Scalar to match per-bucket
-            // density. Tune up further if directional artifacts surface.
+            // Quadrant variance scales 1/sqrt(N/4) — needs ~4× Scalar's samples
+            // to match per-bucket density.
             v.samplesPerVoxel = encoding == VALVisibilityEncoding.Quadrant ? 64 : 16;
             v.priority = priority;
             v.encoding = encoding;
@@ -801,13 +636,12 @@ namespace VideoAreaLight.Samples.Demo
             var go = new GameObject("SpawnFill");
             go.transform.SetParent(parent, false);
             go.transform.position = new Vector3(6.5f, 2.8f, -5.5f);
-            go.transform.rotation = Quaternion.Euler(90f, 0, 0); // point straight down
+            go.transform.rotation = Quaternion.Euler(90f, 0, 0);
             var l = go.AddComponent<Light>();
             l.type = LightType.Spot;
             l.color = new Color(1f, 0.85f, 0.65f);
-            // Calibrated for URP 17's default Physical Light Units (lumens).
-            // ~120 lumens reads as a small accent fixture. If your project
-            // has Use Physical Light Units = OFF, drop this to 1.5–3.
+            // Calibrated for URP 17 Physical Light Units (lumens). With PLU
+            // off, drop this to 1.5–3.
             l.intensity = 120f;
             l.range = 4f;
             l.spotAngle = 110f;
@@ -819,8 +653,7 @@ namespace VideoAreaLight.Samples.Demo
         {
             var go = new GameObject("Camera");
             go.tag = "MainCamera";
-            // Just inside the main-room doorway, looking N at the booth + screen.
-            // Walk to the corridor at runtime to see the no-leak demo.
+            // Just inside the main-room doorway, looking N at booth + screen.
             go.transform.position = new Vector3(0f, 1.7f, -2.0f);
             go.transform.rotation = Quaternion.Euler(5f, 0f, 0f);
             var cam = go.AddComponent<Camera>();
@@ -830,8 +663,8 @@ namespace VideoAreaLight.Samples.Demo
             cam.clearFlags = CameraClearFlags.SolidColor;
             cam.backgroundColor = Color.black;
 
-            // URP cameras default to renderPostProcessing = false, so the
-            // PostFX_Volume's profile would be inert without this flag.
+            // URP cameras default renderPostProcessing=false; without this the
+            // PostFX_Volume profile is inert.
             cam.GetUniversalAdditionalCameraData().renderPostProcessing = true;
 
             go.AddComponent<AudioListener>();
