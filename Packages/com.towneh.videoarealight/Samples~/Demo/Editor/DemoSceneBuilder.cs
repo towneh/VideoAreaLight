@@ -11,31 +11,6 @@ using UnityEngine.Video;
 namespace VideoAreaLight.Samples.Demo
 {
     // One-shot builder for the VideoAreaLight demo scene.
-    //
-    // Construct from the menu after importing the sample. Idempotent:
-    // re-run to regenerate after a dimensions tweak. The script lives
-    // alongside the scene it produces, so it doubles as the spec.
-    //
-    // Layout (top-down, origin at main-room floor center):
-    //
-    //                        +Z
-    //                         ^
-    //          +--------------+--------------+
-    //          |          MAIN ROOM          |    interior 8 x 5 x 3.5
-    //          |                             |    screen on N wall
-    //          |       (DJ booth here)       |    glossy floor
-    //          |                             |
-    //          +-------------+-+-------------+
-    //                        | | doorway     -> -X
-    //                        | |
-    //              corridor A| |  (south leg)
-    //                        | |
-    //          +-------------+ +-------------+
-    //          |          corridor B          |    east leg, opens to spawn
-    //          +------------------------------+
-    //                                         |
-    //                                  (spawn alcove, lit by separate fill)
-    //
     public static class DemoSceneBuilder
     {
         const string SceneName = "Demo";
@@ -64,7 +39,18 @@ namespace VideoAreaLight.Samples.Demo
             EnsureFolder(materialsPath);
             EnsureFolder(texturesPath);
 
-            var mats = CreateMaterials(materialsPath);
+            // Floor: smooth fBm, fine features, low strength — preserves the
+            // gloss reflection of the screen as a believable hazy mirror.
+            var floorNormal = CreateNoiseNormalMap(texturesPath, "VAL_Floor_Normal",
+                frequency: 18f, strength: 1.2f, turbulenceMix: 0f, seed: 1337);
+            // Walls: turbulence/smooth mix + smaller features + higher strength
+            // — reads as painted render/plaster. No specular reflection here
+            // so we can be bolder; pure turbulence's abs() ridges read as
+            // crumpled paper at this scale, so we mix it 60/40 with smooth
+            // fBm to soften the crease network into organic surface texture.
+            var wallNormal = CreateNoiseNormalMap(texturesPath, "VAL_Wall_Normal",
+                frequency: 14f, strength: 1.5f, turbulenceMix: 0.6f, seed: 7331);
+            var mats = CreateMaterials(materialsPath, floorNormal, wallNormal);
             if (mats.walls == null) return; // shader lookup failed; error logged inside
 
             var screenRT = CreateScreenRT(texturesPath);
@@ -82,6 +68,7 @@ namespace VideoAreaLight.Samples.Demo
 
             var props = new GameObject("Props").transform;
             BuildDJBooth(props, mats);
+            BuildPlayer(props, materialsPath);
 
             var lighting = new GameObject("Lighting").transform;
             BuildPostFXVolume(lighting, volumeProfile);
@@ -210,7 +197,7 @@ namespace VideoAreaLight.Samples.Demo
             public Material boothMatte;
         }
 
-        static Mats CreateMaterials(string folder)
+        static Mats CreateMaterials(string folder, Texture2D floorNormal, Texture2D wallNormal)
         {
             // Surfaces that receive the area light MUST use VideoAreaLight/Lit
             // (or Shader Graph / Poiyomi with the VAL hook). URP/Lit alone
@@ -230,7 +217,7 @@ namespace VideoAreaLight.Samples.Demo
                 return default;
             }
 
-            return new Mats
+            var mats = new Mats
             {
                 walls      = MakeLit(folder, "VAL_Walls",       lit, new Color(0.40f, 0.40f, 0.42f), 0.15f),
                 ceiling    = MakeLit(folder, "VAL_Ceiling",     lit, new Color(0.05f, 0.05f, 0.06f), 0.05f),
@@ -239,6 +226,28 @@ namespace VideoAreaLight.Samples.Demo
                 boothMatte = MakeLit(folder, "VAL_BoothMatte",  lit, new Color(0.02f, 0.02f, 0.02f), 0.10f),
                 screen     = MakeUnlit(folder, "VAL_Screen",    unlit, Color.white),
             };
+
+            // Floor normal: 1m tiling across the 8x5m main-room floor.
+            // _BumpScale stays subtle so the screen's gloss reflection
+            // stays legible — aggressive normals shatter the mirror into
+            // incoherent noise.
+            mats.floor.SetTexture("_BumpMap", floorNormal);
+            mats.floor.SetFloat("_BumpScale", 0.15f);
+            mats.floor.SetTextureScale("_BumpMap", new Vector2(8f, 5f));
+            mats.floor.EnableKeyword("_NORMALMAP");
+            EditorUtility.SetDirty(mats.floor);
+
+            // Wall normal: 4m tiling. Walls are viewed from metres back, not
+            // arm's length like floors, so dense tiling makes the repetition
+            // pattern visible without earning extra detail. Larger tiles
+            // hide the seam without losing apparent surface character.
+            mats.walls.SetTexture("_BumpMap", wallNormal);
+            mats.walls.SetFloat("_BumpScale", 0.2f);
+            mats.walls.SetTextureScale("_BumpMap", new Vector2(2f, 0.875f));
+            mats.walls.EnableKeyword("_NORMALMAP");
+            EditorUtility.SetDirty(mats.walls);
+
+            return mats;
         }
 
         static Material MakeLit(string folder, string name, Shader s, Color baseColor, float smoothness)
@@ -375,6 +384,104 @@ namespace VideoAreaLight.Samples.Demo
             if (importer.wrapMode == TextureWrapMode.Clamp) return;
             importer.wrapMode = TextureWrapMode.Clamp;
             importer.SaveAndReimport();
+        }
+
+        // Procedural stochastic normal map: low-frequency domain warp +
+        // multi-octave noise height, central-difference Sobel for
+        // tangent-space normals. Re-imports as TextureType=NormalMap so
+        // Unity uses the correct decode path. Modulo wraparound on the
+        // central-difference step keeps the tile seam invisible at the
+        // Repeat boundary. turbulenceMix blends abs(2x-1) (sharp creases,
+        // matte-surface character) with smooth fBm (rounded undulation,
+        // gloss-friendly): 0 = pure smooth, 1 = pure turbulence.
+        static Texture2D CreateNoiseNormalMap(string folder, string fileName,
+            float frequency, float strength, float turbulenceMix, int seed)
+        {
+            string path = $"{folder}/{fileName}.png";
+
+            const int size = 512;
+            const int octaves = 5;
+            const float lacunarity = 2f;
+            const float gain = 0.5f;
+            const float warpAmount = 0.04f;
+
+            var rng = new System.Random(seed);
+            Vector2 noiseOffset = new Vector2(
+                (float)rng.NextDouble() * 1000f,
+                (float)rng.NextDouble() * 1000f);
+            Vector2 warpOffset = new Vector2(
+                (float)rng.NextDouble() * 1000f,
+                (float)rng.NextDouble() * 1000f);
+
+            float[] hgt = new float[size * size];
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float u = (float)x / size;
+                    float v = (float)y / size;
+
+                    float wx = Mathf.PerlinNoise(u * 2f + warpOffset.x,         v * 2f + warpOffset.y)         - 0.5f;
+                    float wy = Mathf.PerlinNoise(u * 2f + warpOffset.x + 100f,  v * 2f + warpOffset.y + 100f)  - 0.5f;
+                    float wu = u + wx * warpAmount;
+                    float wv = v + wy * warpAmount;
+
+                    float amp = 1f, freq = frequency, sum = 0f, norm = 0f;
+                    for (int o = 0; o < octaves; o++)
+                    {
+                        float n = Mathf.PerlinNoise(wu * freq + noiseOffset.x,
+                                                    wv * freq + noiseOffset.y);
+                        sum  += amp * Mathf.Lerp(n, Mathf.Abs(n * 2f - 1f), turbulenceMix);
+                        norm += amp;
+                        amp  *= gain;
+                        freq *= lacunarity;
+                    }
+                    hgt[y * size + x] = sum / norm;
+                }
+            }
+
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false, true);
+            var px = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    int xm = (x - 1 + size) % size, xp = (x + 1) % size;
+                    int ym = (y - 1 + size) % size, yp = (y + 1) % size;
+                    float dx = hgt[y * size + xp] - hgt[y * size + xm];
+                    float dy = hgt[yp * size + x] - hgt[ym * size + x];
+                    Vector3 n = new Vector3(-dx * strength, -dy * strength, 1f).normalized;
+                    px[y * size + x] = new Color32(
+                        (byte)((n.x * 0.5f + 0.5f) * 255f),
+                        (byte)((n.y * 0.5f + 0.5f) * 255f),
+                        (byte)((n.z * 0.5f + 0.5f) * 255f),
+                        255);
+                }
+            }
+            tex.SetPixels32(px);
+            tex.Apply();
+            byte[] png = tex.EncodeToPNG();
+            Object.DestroyImmediate(tex);
+
+            string projectRoot = Path.GetDirectoryName(Application.dataPath);
+            string absPath = Path.Combine(projectRoot, path);
+            File.WriteAllBytes(absPath, png);
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+
+            // TextureType=NormalMap tells Unity to compress to BC5 (or
+            // DXT5nm on older targets) and to expect UnpackNormal in the
+            // shader. sRGB must be off — normals encode signed direction
+            // data, not perceptual colour.
+            var importer = AssetImporter.GetAtPath(path) as TextureImporter;
+            if (importer != null)
+            {
+                importer.textureType = TextureImporterType.NormalMap;
+                importer.wrapMode = TextureWrapMode.Repeat;
+                importer.sRGBTexture = false;
+                importer.SaveAndReimport();
+            }
+
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
         }
 
         // --------------------------------------------------------------
@@ -553,6 +660,40 @@ namespace VideoAreaLight.Samples.Demo
             MakeBox(root, "Lectern",  new Vector3( 0,    0.5f,  -1.0f), new Vector3(1.5f, 1.0f, 0.6f), m.booth);
             MakeBox(root, "SpeakerL", new Vector3(-1.2f, 0.75f, -1.0f), new Vector3(0.5f, 1.5f, 0.5f), m.boothMatte);
             MakeBox(root, "SpeakerR", new Vector3( 1.2f, 0.75f, -1.0f), new Vector3(0.5f, 1.5f, 0.5f), m.boothMatte);
+        }
+
+        // Disabled-by-default capsule with a plain URP/Lit material. URP/Lit
+        // does not read the _VAL_* globals, so the capsule does not receive
+        // VAL contribution.
+        static void BuildPlayer(Transform props, string materialsPath)
+        {
+            var go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            go.name = "Player";
+            go.transform.SetParent(props, false);
+            go.transform.localPosition = new Vector3(0f, 0.75f, 0f);
+            go.transform.localScale = new Vector3(0.75f, 0.75f, 0.75f);
+
+            var col = go.GetComponent<Collider>();
+            if (col != null) Object.DestroyImmediate(col);
+
+            var urpLit = Shader.Find("Universal Render Pipeline/Lit");
+            if (urpLit == null)
+            {
+                Debug.LogWarning("DemoSceneBuilder: 'Universal Render Pipeline/Lit' shader not found; " +
+                                 "Player capsule will use the primitive's default material.");
+            }
+            else
+            {
+                string matPath = $"{materialsPath}/VAL_Player.mat";
+                var existing = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+                var mat = existing != null ? existing : new Material(urpLit) { name = "VAL_Player" };
+                mat.shader = urpLit;
+                if (existing == null) AssetDatabase.CreateAsset(mat, matPath);
+                else EditorUtility.SetDirty(mat);
+                go.GetComponent<MeshRenderer>().sharedMaterial = mat;
+            }
+
+            go.SetActive(false);
         }
 
         // --------------------------------------------------------------

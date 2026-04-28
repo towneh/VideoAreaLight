@@ -29,6 +29,7 @@ float4   _VAL_Normal;            // outward normal of the emitter (unit)
 float    _VAL_TwoSided;
 float    _VAL_Valid;
 float4x4 _VAL_CookieWorldToUV;   // unused by MRP for sampling but kept for API parity
+float    _VAL_CookieMipCount;    // cookie texture's mipmap count (1 if no mips); pushed by broadcaster
 
 // Optional zone mask. When _VAL_ZoneEnabled is set, fragments outside the
 // broadcaster's zone collider receive no contribution (lets walls block the
@@ -334,7 +335,12 @@ float3 VAL_SpecularContribution(
         // reflection bleeds bright bands past its actual footprint. Worth
         // the one ALU.
         float2 cookieUV = saturate(mul(_VAL_CookieWorldToUV, float4(mrpWS, 1.0)).xy);
-        float mip = roughness * 7.0;
+        // Ramp the LOD across the texture's full mip chain so roughness=1
+        // lands on the smallest mip (single-pixel average). A no-mips
+        // cookie pushes mipmapCount=1, collapsing the ramp to mip 0 and
+        // forcing a mirror-sharp sample at every roughness — fixed by
+        // enabling Mipmaps on the source RT/Texture.
+        float mip = roughness * max(_VAL_CookieMipCount - 1.0, 0.0);
         emit *= SAMPLE_TEXTURE2D_LOD(_VAL_CookieTex, sampler_VAL_CookieTex, cookieUV, mip).rgb;
     }
 
@@ -347,12 +353,24 @@ float3 VAL_SpecularContribution(
 }
 
 // ---------------------------------------------------------------------------
-// Public entry point. Outputs additive diffuse + specular contributions in
-// linear colour space. Sum these into your shader's emission (or per-pixel
-// lighting accumulator).
+// Public entry points.
+//
+// `VAL_EvaluateAreaLightSeparate` returns diffuse irradiance with no albedo
+// tint and specular with F0 already baked. Use this when integrating into a
+// pipeline that multiplies a downstream lighting accumulator by baseColor on
+// your behalf (e.g. Poiyomi's `finalColor = baseColor * finalLighting`); add
+// the un-tinted diffuse to that accumulator and let the host shader apply
+// albedo at the snapshot.
+//
+// `VAL_EvaluateAreaLight` is the convenience wrapper that returns terms
+// ready to add directly to a final color (diffuse already multiplied by
+// baseColor). The bundled VideoAreaLight/Lit shader and the Shader Graph
+// node both use this form.
+//
+// All outputs are in linear colour space.
 // ---------------------------------------------------------------------------
 
-void VAL_EvaluateAreaLight(
+void VAL_EvaluateAreaLightSeparate(
     float3 worldPos,
     float3 worldNormal,
     float3 worldView,
@@ -360,11 +378,11 @@ void VAL_EvaluateAreaLight(
     float3 baseColor,
     float  metallic,
     bool   useCookie,
-    out float3 diffuseOut,
+    out float3 diffuseIrradianceOut,
     out float3 specularOut)
 {
-    diffuseOut  = float3(0, 0, 0);
-    specularOut = float3(0, 0, 0);
+    diffuseIrradianceOut = float3(0, 0, 0);
+    specularOut          = float3(0, 0, 0);
 
     if (_VAL_Valid < 0.5) return;
 
@@ -452,8 +470,12 @@ void VAL_EvaluateAreaLight(
 
     // Diffuse: analytic polygon irradiance (cookie averages out, so we use
     // the broadcast average colour, which is already what _VAL_Color carries).
+    // baseColor is intentionally not multiplied in here — the caller composes
+    // it (the wrapper below does so for direct callers; integrations like the
+    // Poiyomi module skip it because their host shader applies baseColor at
+    // its own diffuse snapshot).
     float ffDiffuse = VAL_DiffuseFormFactor(N, V, worldPos, P0, P1, P2, P3, twoSided);
-    diffuseOut = lightColor * ffDiffuse * baseColor * (1.0 - metallic) * facingMask;
+    diffuseIrradianceOut = lightColor * ffDiffuse * (1.0 - metallic) * facingMask;
 
     // Specular: Karis MRP with optional cookie at the MRP UV.
     float3 F0 = lerp(float3(0.04, 0.04, 0.04), baseColor, metallic);
@@ -462,8 +484,35 @@ void VAL_EvaluateAreaLight(
         P0, P1, P2, P3,
         lightColor, twoSided, useCookie) * facingMask;
 
-    diffuseOut  *= zoneFalloff * visDiffuse;
-    specularOut *= zoneFalloff * visSpecularEffective;
+    // Energy gate: Karis MRP+GGX produces a broad lobe at full roughness,
+    // leaving a soft rectangular footprint of the screen's reflection
+    // geometry even when the cookie has collapsed to a single average
+    // colour. The gate fades that footprint to zero as smoothness drops;
+    // diffuse stays untouched.
+    float smoothness = 1.0 - roughness;
+    float specularEnergyGate = smoothness;
+
+    diffuseIrradianceOut *= zoneFalloff * visDiffuse;
+    specularOut          *= zoneFalloff * visSpecularEffective * specularEnergyGate;
+}
+
+void VAL_EvaluateAreaLight(
+    float3 worldPos,
+    float3 worldNormal,
+    float3 worldView,
+    float  roughness,
+    float3 baseColor,
+    float  metallic,
+    bool   useCookie,
+    out float3 diffuseOut,
+    out float3 specularOut)
+{
+    float3 diffuseIrradiance;
+    VAL_EvaluateAreaLightSeparate(
+        worldPos, worldNormal, worldView, roughness,
+        baseColor, metallic, useCookie,
+        diffuseIrradiance, specularOut);
+    diffuseOut = diffuseIrradiance * baseColor;
 }
 
 #endif // VAL_RECT_AREA_LIGHT_INCLUDED

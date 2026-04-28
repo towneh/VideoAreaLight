@@ -49,13 +49,20 @@ namespace VideoAreaLight.EditorTools
 
         // Maps Poiyomi injection keyword → template name inside the collection.
         // Order is the order Templates are listed on the ShaderModule asset.
+        //
+        // The function-call template binds to FRAGMENT_BASE_LIGHTING_EARLY so
+        // its writes to poiLight.finalLighting land before Poi_Shading's
+        // `finalColor = baseColor * finalLighting` snapshot, which is bound
+        // to FRAGMENT_BASE_LIGHTING. EARLY is emitted strictly before
+        // FRAGMENT_BASE_LIGHTING by the pass templates regardless of
+        // module registration order.
         static readonly (string keyword, string templateName, int queue)[] Bindings =
         {
             ("LIGHTING_PROPERTIES",            "PoiVideoAreaLightProperties",   101),
             ("SHADER_KEYWORDS",                "PoiVideoAreaLightKeywords",     100),
             ("BASE_PROPERTY_VARIABLES_EXPOSED","PoiVideoAreaLightVariables",    100),
             ("FRAGMENT_BASE_FUNCTIONS",        "PoiVideoAreaLightFunction",     100),
-            ("FRAGMENT_BASE_LIGHTING",         "PoiVideoAreaLightFunctionCall", 100),
+            ("FRAGMENT_BASE_LIGHTING_EARLY",   "PoiVideoAreaLightFunctionCall", 100),
         };
 
         // ============================================================

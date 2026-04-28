@@ -50,6 +50,7 @@ public class VideoAreaLightSource : MonoBehaviour
     static int _IntensityId;
     static int _NormalId;
     static int _CookieTexId;
+    static int _CookieMipCountId;
     static int _TwoSidedId;
     static int _ValidId;
     static int _CookieMatrixId;
@@ -92,6 +93,7 @@ public class VideoAreaLightSource : MonoBehaviour
         _IntensityId       = Shader.PropertyToID("_VAL_Intensity");
         _NormalId          = Shader.PropertyToID("_VAL_Normal");
         _CookieTexId       = Shader.PropertyToID("_VAL_CookieTex");
+        _CookieMipCountId  = Shader.PropertyToID("_VAL_CookieMipCount");
         _TwoSidedId        = Shader.PropertyToID("_VAL_TwoSided");
         _ValidId           = Shader.PropertyToID("_VAL_Valid");
         _CookieMatrixId    = Shader.PropertyToID("_VAL_CookieWorldToUV");
@@ -246,7 +248,13 @@ public class VideoAreaLightSource : MonoBehaviour
         Shader.SetGlobalFloat(_TwoSidedId, twoSided ? 1f : 0f);
         Shader.SetGlobalMatrix(_CookieMatrixId, worldToUV);
 
-        if (videoTexture != null) Shader.SetGlobalTexture(_CookieTexId, videoTexture);
+        if (videoTexture != null)
+        {
+            Shader.SetGlobalTexture(_CookieTexId, videoTexture);
+            // mipmapCount drives the shader's LOD ramp. Textures without
+            // mipmaps report 1, collapsing the ramp to mip 0.
+            Shader.SetGlobalFloat(_CookieMipCountId, Mathf.Max(videoTexture.mipmapCount, 1));
+        }
 
         PushZoneGlobals();
 

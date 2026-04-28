@@ -13,6 +13,16 @@ All notable changes to this package are documented here.
 
 ### Changed
 - Sample lineup consolidated to a single `Demo` plus the existing `Poiyomi Integration` template.
+- **Cookie LOD ramp scales with the source texture's mipmap count.** Previously hard-coded as `roughness * 7.0` (mip 7 of an 11-mip 1080p RT — still ~15×8 px of recognizable image content at full roughness). The broadcaster now pushes `_VAL_CookieMipCount` from `Texture.mipmapCount`; the shader ramps `roughness * (mipCount - 1)` so full roughness lands on the smallest mip (single-pixel average). Caveat: textures without mipmaps report `mipmapCount = 1`, collapsing the ramp to mip 0 — fix is to enable Mipmaps + Auto-generate on the source.
+- **Specular gated linearly by smoothness.** Karis MRP+GGX produces a broad lobe at full roughness, leaving a soft rectangular footprint of the reflection geometry even after the cookie has averaged out. Multiplying specular by smoothness fades that footprint to zero as smoothness drops. Behaviour change for low-smoothness materials; rough surfaces now read as fully Lambertian under VAL. Diffuse is unaffected.
+- **Poiyomi integration: diffuse routes through `poiLight.finalLighting`** (not `finalLightAdd`), and the function-call template binds to `FRAGMENT_BASE_LIGHTING_EARLY` (not `FRAGMENT_BASE_LIGHTING`). Diffuse now picks up Poi_Shading's `finalColor = baseColor * finalLighting` snapshot, so `_LightingCap` and other pre-snapshot pipeline adjustments apply to the VAL contribution. Specular continues through `finalLightAdd`. After upgrading, re-run **Tools → VideoAreaLight → Install Poiyomi Module** *and* **VideoAreaLight - Apply to Material's Shader** to pick up both the new template and the new anchor binding.
+
+### Added (HLSL)
+- `VAL_EvaluateAreaLightSeparate` — public entry point in `RectAreaLight.hlsl` that returns un-tinted diffuse irradiance and F0-baked specular, for integrators that apply baseColor downstream. The original `VAL_EvaluateAreaLight` is preserved as a thin wrapper, so the bundled `VideoAreaLight/Lit` shader and the Shader Graph node are unchanged.
+
+### Added (Poiyomi)
+- **Use Reflections & Specular Settings** toggle (default ON) in the VAL section. When ON and the Reflections & Specular module is enabled, VAL reads `poiFragData.smoothness` / `.metallic` / `.specularMask` (slider × Packed Maps × inverts) and re-applies the Mochie *global* metallic / smoothness / specular-strength masks at the call site. Specular output is multiplied by the resolved `specularMask`, so the Specular Visibility slider, the Specular Mask channel of the Packed Maps texture, and `_MochieSpecularStrengthGlobalMask` now affect VAL's screen reflection.
+- **Smoothness** and **Metallic** sliders in the VAL section, shown when **Use Reflections & Specular Settings** is OFF or the Reflections & Specular module is disabled (`_MochieBRDF == 0`). Lets users put VAL on materials without the Reflections & Specular module, without falling back to the default `poiFragData` values (smoothness/metallic = 1 = sharp mirror).
 
 ### Removed
 - `Example Scene` sample. After upgrading, run `Tools > VideoAreaLight > Clean Up Old Sample Imports` (or manually delete `Assets/Samples/Video Area Light/<old-version>/`) to remove its imported copy.

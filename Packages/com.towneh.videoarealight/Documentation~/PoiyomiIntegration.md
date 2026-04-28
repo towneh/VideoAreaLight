@@ -63,8 +63,10 @@ Open any Poiyomi material whose shader was regenerated. Scroll to the **Video Ar
 
 - **Video Area Light Enabled** — master toggle. Default OFF. Materials with the toggle off pay nothing at runtime; the section just appears in their inspector.
 - **Sample Video Cookie for Specular** — when on, the highlight reflects the actual video content. When off, only the average broadcast colour is used.
+- **Use Reflections & Specular Settings** — default ON. Reads smoothness, metallic, and specular mask from Poiyomi's Reflections & Specular section (slider × Packed Maps × inverts × strength × the relevant Mochie global masks). Turn OFF to drive VAL's surface state independently from VAL's own sliders below — useful when the Reflections & Specular section is disabled on the material, or when you want VAL's reflection sharpness to differ from the rest of the BRDF.
+- **Smoothness** / **Metallic** — VAL-local sliders, shown when **Use Reflections & Specular Settings** is OFF, or when the Reflections & Specular section's master toggle is off.
 - **Diffuse Multiplier** — scales the diffuse contribution.
-- **Specular Multiplier** — scales the specular highlight.
+- **Specular Multiplier** — scales the specular highlight. The Reflections & Specular section's Specular Visibility / Specular Mask still gates VAL specular when **Use Reflections & Specular Settings** is ON; this slider is the additional VAL-local control on top.
 
 ## The mental model — *shaders* are scoped, *materials* are toggled
 

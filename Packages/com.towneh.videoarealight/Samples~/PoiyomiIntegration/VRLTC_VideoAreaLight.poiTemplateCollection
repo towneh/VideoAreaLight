@@ -1,8 +1,11 @@
 #T#PoiVideoAreaLightProperties
 //ifex _VideoAreaLightEnabled!=1
 [HideInInspector] m_start_VideoAreaLight (" Video Area Light--{reference_property:_VideoAreaLightEnabled,button_help:{text:GitHub,action:{type:URL,data:https://github.com/towneh/VideoAreaLight},hover:Open the VideoAreaLight repo on GitHub}}", Float) = 0
-[Toggle(POI_VIDEOAREALIGHT)]_VideoAreaLightEnabled ("Video Area Light Enabled", Float) = 0
+[ThryHideInInspector][ThryToggle(POI_VIDEOAREALIGHT)]_VideoAreaLightEnabled ("Video Area Light Enabled", Float) = 0
 [ToggleUI] _VideoAreaLight_UseCookie ("Sample Video Cookie for Specular", Int) = 1
+[ToggleUI] _VideoAreaLight_UsePBR ("Use Reflections & Specular Settings", Int) = 1
+_VideoAreaLight_Smoothness ("Smoothness--{condition_showS:(_VideoAreaLight_UsePBR==0 || _MochieBRDF==0)}", Range(0, 1)) = 0.5
+_VideoAreaLight_Metallic ("Metallic--{condition_showS:(_VideoAreaLight_UsePBR==0 || _MochieBRDF==0)}", Range(0, 1)) = 0.0
 _VideoAreaLight_DiffuseMultiplier ("Diffuse Multiplier", Range(0, 4)) = 1.0
 _VideoAreaLight_SpecularMultiplier ("Specular Multiplier", Range(0, 4)) = 1.0
 [HideInInspector] m_end_VideoAreaLight ("VideoAreaLight", Float) = 0
@@ -15,6 +18,9 @@ _VideoAreaLight_SpecularMultiplier ("Specular Multiplier", Range(0, 4)) = 1.0
 //ifex _VideoAreaLightEnabled!=1
 #ifdef POI_VIDEOAREALIGHT
     int _VideoAreaLight_UseCookie;
+    int _VideoAreaLight_UsePBR;
+    float _VideoAreaLight_Smoothness;
+    float _VideoAreaLight_Metallic;
     float _VideoAreaLight_DiffuseMultiplier;
     float _VideoAreaLight_SpecularMultiplier;
 #endif
@@ -29,12 +35,6 @@ _VideoAreaLight_SpecularMultiplier ("Specular Multiplier", Range(0, 4)) = 1.0
 //ifex _VideoAreaLightEnabled!=1
 #ifdef POI_VIDEOAREALIGHT
     {
-        // VAL is a global emitter (one VideoAreaLightSource per scene pushes
-        // _VAL_* globals via Shader.SetGlobal*). The MAIN_LIGHT_PASS gate
-        // ensures we only contribute once per fragment, not per Unity light.
-        float3 _val_diffuse = 0;
-        float3 _val_specular = 0;
-
         // Bent normal feeds the diffuse polygon-irradiance integral when
         // available, so occluded areas get direction-aware diffuse falloff.
         float3 _val_normal = poiMesh.normals[1];
@@ -42,25 +42,71 @@ _VideoAreaLight_SpecularMultiplier ("Specular Multiplier", Range(0, 4)) = 1.0
         if (poiMesh.hasBentNormal) _val_normal = poiMesh.bentNormal;
     #endif
 
-        VAL_EvaluateAreaLight(
+        // Resolve the per-fragment surface state VAL evaluates against. Two
+        // modes selected by _VideoAreaLight_UsePBR:
+        //
+        //   1. UsePBR ON + MOCHIE_PBR compiled in — read smoothness, metallic
+        //      and specularMask the Reflections & Specular module wrote to
+        //      poiFragData (slider × Packed Maps × inverts × strength). The
+        //      module writes the Mochie *global* masks only to mochieBRDFData,
+        //      not to poiFragData, so we re-apply them here using the same
+        //      customBlend pattern Poiyomi uses internally.
+        //   2. UsePBR OFF, or MOCHIE_PBR not compiled in — fall back to the
+        //      VAL section's own _VideoAreaLight_Smoothness / _Metallic
+        //      sliders. specMask defaults to 1 (Mochie's mask system has no
+        //      analogue when its module isn't present).
+        float _val_smoothness = _VideoAreaLight_Smoothness;
+        float _val_metallic   = _VideoAreaLight_Metallic;
+        float _val_specMask   = 1;
+
+    #ifdef MOCHIE_PBR
+        if (_VideoAreaLight_UsePBR)
+        {
+            float _val_pbrSmoothness   = poiFragData.smoothness;
+            float _val_pbrMetallic     = poiFragData.metallic;
+            float _val_pbrSpecularMask = poiFragData.specularMask;
+
+            if (_MochieMetallicGlobalMask > 0)
+            {
+                _val_pbrMetallic = customBlend(_val_pbrMetallic, poiMods.globalMask[_MochieMetallicGlobalMask - 1], _MochieMetallicGlobalMaskBlendType);
+            }
+            if (_MochieSmoothnessGlobalMask > 0)
+            {
+                _val_pbrSmoothness = customBlend(_val_pbrSmoothness, poiMods.globalMask[_MochieSmoothnessGlobalMask - 1], _MochieSmoothnessGlobalMaskBlendType);
+            }
+            if (_MochieSpecularStrengthGlobalMask > 0)
+            {
+                _val_pbrSpecularMask = customBlend(_val_pbrSpecularMask, poiMods.globalMask[_MochieSpecularStrengthGlobalMask - 1], _MochieSpecularStrengthGlobalMaskBlendType);
+            }
+
+            _val_smoothness = _val_pbrSmoothness;
+            _val_metallic   = _val_pbrMetallic;
+            _val_specMask   = _val_pbrSpecularMask;
+        }
+    #endif
+
+        // Diffuse goes into finalLighting so the snapshot's baseColor
+        // multiply and Poiyomi's lighting cap apply. Specular already has
+        // F0 baked in, so it goes into finalLightAdd to stay independent
+        // of baseColor.
+        float3 _val_diffuse  = 0;
+        float3 _val_specular = 0;
+        VAL_EvaluateAreaLightSeparate(
             poiMesh.worldPos,
             _val_normal,
             normalize(poiCam.worldPos - poiMesh.worldPos),
-            1.0 - poiFragData.smoothness,
+            1.0 - _val_smoothness,
             poiFragData.baseColor.rgb,
-            poiFragData.metallic,
+            _val_metallic,
             _VideoAreaLight_UseCookie != 0,
             _val_diffuse, _val_specular);
 
-        // Both diffuse and specular go into finalLightAdd, NOT finalLighting.
-        // The FRAGMENT_BASE_LIGHTING injection point lands AFTER Poiyomi's
-        // diffuse snapshot (`finalColor = baseColor * finalLighting`), so
-        // anything we add to finalLighting is dead code. finalLightAdd is
-        // applied to finalColor *after* our injection, so both terms survive.
-        // VAL_EvaluateAreaLight already multiplies the diffuse component by
-        // baseColor internally, so we don't lose the albedo modulation.
-        poiLight.finalLightAdd += _val_diffuse  * _VideoAreaLight_DiffuseMultiplier;
-        poiLight.finalLightAdd += _val_specular * _VideoAreaLight_SpecularMultiplier;
+        poiLight.finalLighting += _val_diffuse * _VideoAreaLight_DiffuseMultiplier;
+        if (poiLight.lightingCapEnabled)
+        {
+            poiLight.finalLighting = min(poiLight.finalLighting, _LightingCap);
+        }
+        poiLight.finalLightAdd += _val_specular * _VideoAreaLight_SpecularMultiplier * _val_specMask;
     }
 #endif
 //endex
